@@ -16,6 +16,7 @@ const chatForm = $('chatinput') as HTMLFormElement;
 const chatbox = $('chatbox') as HTMLTextAreaElement;
 const menuToggle = $('menu-toggle');
 const backdrop = $('backdrop');
+const sidebar = $('sidebar');
 
 let activeEl: HTMLElement | null = null;
 let current: { host: Host; session: SessionInfo } | null = null;
@@ -28,6 +29,30 @@ const closeMenu = () => document.body.classList.remove('menu-open');
 const toggleMenu = () => document.body.classList.toggle('menu-open');
 menuToggle.addEventListener('click', toggleMenu);
 backdrop.addEventListener('click', closeMenu);
+
+// ── view filters (menu: hide all tool calls / results) ───────────────────────
+function setupFilters(): void {
+  const bar = document.createElement('div');
+  bar.id = 'filters';
+  for (const [cls, label] of [['hide-tools', 'tool calls'], ['hide-results', 'results']] as const) {
+    if (localStorage.getItem('ap.' + cls) === '1') document.body.classList.add(cls);
+    const btn = document.createElement('button');
+    const sync = () => {
+      const on = document.body.classList.contains(cls);
+      btn.textContent = `${on ? 'Show' : 'Hide'} ${label}`;
+      btn.classList.toggle('active', on);
+    };
+    btn.addEventListener('click', () => {
+      const on = document.body.classList.toggle(cls);
+      localStorage.setItem('ap.' + cls, on ? '1' : '0');
+      sync();
+    });
+    sync();
+    bar.appendChild(btn);
+  }
+  sidebar.prepend(bar);
+}
+setupFilters();
 
 chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -136,10 +161,14 @@ const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;'
 function renderEvent(e: ChatEvent): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = `msg ${e.role}`;
-  const who = document.createElement('div');
-  who.className = 'who';
-  who.textContent = e.role === 'user' ? 'You' : 'Agent';
-  wrap.appendChild(who);
+  // A "user" event that is only tool_result blocks is tool output, not a person.
+  const isToolOutput = e.role === 'user' && e.blocks.length > 0 && e.blocks.every((b) => b.kind === 'tool_result');
+  if (!isToolOutput) {
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.textContent = e.role === 'user' ? 'You' : 'Agent';
+    wrap.appendChild(who);
+  }
   for (const b of e.blocks) {
     if (b.kind === 'text' && b.text) {
       const d = document.createElement('div');
@@ -155,7 +184,7 @@ function renderEvent(e: ChatEvent): HTMLElement {
       wrap.appendChild(renderToolUse(b));
     } else if (b.kind === 'tool_result' && b.result) {
       const det = document.createElement('details');
-      det.className = 'tool';
+      det.className = 'tool tr';
       det.innerHTML = `<summary><span class="tname">${b.isError ? '⚠ result' : '▸ result'}</span></summary><pre>${esc(clip(b.result))}</pre>`;
       wrap.appendChild(det);
     }
@@ -165,7 +194,7 @@ function renderEvent(e: ChatEvent): HTMLElement {
 
 function renderToolUse(b: ChatBlock): HTMLElement {
   const det = document.createElement('details');
-  det.className = 'tool';
+  det.className = 'tool tu';
   const summary = `<summary><span class="tname">🔧 ${esc(b.tool ?? 'tool')}</span><span class="targ">${esc(summarize(b.tool ?? '', b.input))}</span></summary>`;
   let body: string;
   if ((b.tool === 'Edit' || b.tool === 'Write') && b.input?.new_string !== undefined) {

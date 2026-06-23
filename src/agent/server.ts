@@ -194,10 +194,20 @@ export function startAgent(cfg: Config): { close: () => void } {
       if (ws.readyState === WebSocket.OPEN) ws.send(encode({ type: 'chat', events }));
     });
 
+    // Serialize sends so rapidly-queued messages don't interleave: each
+    // message's text + Enter completes (plus a small gap) before the next.
+    let queue: Promise<void> = Promise.resolve();
     ws.on('message', (raw) => {
       try {
         const msg = decode<ClientToAgent>(raw as Buffer);
-        if (msg.type === 'input') void (async () => { await sendRaw(pane, msg.data); await sendEnter(pane); })();
+        if (msg.type === 'input') {
+          const data = msg.data;
+          queue = queue.then(async () => {
+            await sendRaw(pane, data);
+            await sendEnter(pane);
+            await new Promise((r) => setTimeout(r, 150));
+          });
+        }
       } catch {
         /* ignore */
       }

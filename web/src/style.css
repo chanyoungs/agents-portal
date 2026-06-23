@@ -1,4 +1,5 @@
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* beat display:flex on #chatinput etc. */
 html, body { height: 100%; margin: 0; }
 body {
   display: flex;
@@ -16,6 +17,11 @@ body {
   flex-direction: column;
   overflow-y: auto;
 }
+#filters { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; border-bottom: 1px solid #21262d; }
+#filters button { flex: 1; min-width: 88px; background: #161b22; color: #7d8590; border: 1px solid #30363d; border-radius: 6px; padding: 6px; font-size: 12px; cursor: pointer; }
+#filters button.active { color: #e6edf3; border-color: #1f6feb; background: #1f6feb22; }
+body.hide-tools .tu { display: none; }
+body.hide-results .tr { display: none; }
 #hosts { list-style: none; margin: 0; padding: 8px 0; }
 .host-name { padding: 10px 12px; font-weight: 600; color: #7d8590; font-size: 12px; text-transform: uppercase; }
 .session {
