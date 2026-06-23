@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Config } from '../config.js';
-import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw, sendEnter, findAgentPane } from './tmux.js';
+import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw, sendEnter, findAgentPane, paneVisible } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
 import { findClaudeTranscript, TranscriptTailer } from './transcript.js';
 import {
@@ -212,7 +212,25 @@ export function startAgent(cfg: Config): { close: () => void } {
         /* ignore */
       }
     });
+    // Detect the agent's "working" state from its TUI spinner line and stream
+    // it to the UI. Busy is reported immediately; idle only after it settles
+    // (~1.5s) to ride over the spinner's blink frames.
+    let busy = false;
+    let idle = 0;
+    const BUSY_RE = /…[^\n]*tokens\)|esc to interrupt/i;
+    const statusPoll = setInterval(async () => {
+      const isBusy = BUSY_RE.test(await paneVisible(pane));
+      if (isBusy) {
+        idle = 0;
+        if (!busy) { busy = true; if (ws.readyState === WebSocket.OPEN) ws.send(encode({ type: 'status', busy })); }
+      } else if (busy && ++idle >= 3) {
+        busy = false;
+        if (ws.readyState === WebSocket.OPEN) ws.send(encode({ type: 'status', busy }));
+      }
+    }, 500);
+
     ws.on('close', () => {
+      clearInterval(statusPoll);
       unsub();
       if (tailer!.subscriberCount === 0) {
         tailer!.stop();

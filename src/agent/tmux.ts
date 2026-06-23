@@ -67,6 +67,16 @@ export async function capturePane(session: string, lines = 3000): Promise<string
   }
 }
 
+/** Visible (no scrollback) text of a pane — used to detect the busy spinner. */
+export async function paneVisible(target: string): Promise<string> {
+  try {
+    const { stdout } = await exec('tmux', ['capture-pane', '-p', '-t', target]);
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
 /** Begin piping the pane's raw output to a file (unbuffered). */
 export async function startPipe(session: string, file: string): Promise<void> {
   await exec('tmux', ['pipe-pane', '-o', '-t', session, `stdbuf -o0 cat >> '${file}'`]);

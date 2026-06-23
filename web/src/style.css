@@ -79,6 +79,11 @@ body.hide-results .tr { display: none; }
 .tool pre.add { color: #3fb950; }
 .tool pre.del { color: #f85149; }
 
+/* agent working indicator */
+#thinking { flex-shrink: 0; padding: 6px 12px; color: #7d8590; font-size: 13px; }
+#thinking .spin { display: inline-block; animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* chat input bar */
 #chatinput {
   flex-shrink: 0;

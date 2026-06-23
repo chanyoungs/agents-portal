@@ -76,6 +76,13 @@ chatbox.addEventListener('keydown', (e) => {
   }
 });
 
+// "working…" indicator, driven by the agent's busy state (server status events)
+const thinkingEl = document.createElement('div');
+thinkingEl.id = 'thinking';
+thinkingEl.hidden = true;
+thinkingEl.innerHTML = '<span class="spin">✻</span> working…';
+chatForm.parentElement!.insertBefore(thinkingEl, chatForm);
+
 // ── hosts / discovery ───────────────────────────────────────────────────────
 async function discoverHosts(): Promise<Host[]> {
   const hosts: Host[] = [];
@@ -141,6 +148,7 @@ function connectChat(): void {
   closeChat();
   chatEl.innerHTML = '';
   pending = [];
+  thinkingEl.hidden = true;
   chatWs = new WebSocket(wsUrl(current.host, '/ws/chat', { session: current.session.name }));
   chatWs.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
@@ -148,6 +156,7 @@ function connectChat(): void {
       chatEl.innerHTML = '<div class="empty">No conversation transcript for this session.</div>';
       return;
     }
+    if (msg.type === 'status') { thinkingEl.hidden = !msg.busy; return; }
     if (msg.type !== 'chat') return;
     const nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
     const frag = document.createDocumentFragment();
