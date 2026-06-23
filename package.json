@@ -22,6 +22,7 @@
   "dependencies": {
     "@xterm/addon-unicode11": "^0.9.0",
     "commander": "^12.1.0",
+    "dockview-core": "^7.0.2",
     "express": "^4.21.2",
     "marked": "^18.0.5",
     "node-pty": "^1.1.0",
