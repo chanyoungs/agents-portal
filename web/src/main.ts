@@ -1,4 +1,8 @@
 import { marked } from 'marked';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import '@xterm/xterm/css/xterm.css';
 
 interface Host { name: string; url: string; token?: string }
 interface SessionInfo { name: string; windows: number; cwd: string; attached: boolean; created: number }
@@ -199,6 +203,100 @@ function addChapter(text: string, target: HTMLElement, ts?: string): void {
   chapterListEl.appendChild(li);
 }
 
+// ── tmux (terminal) view + chat/tmux mode toggle ─────────────────────────────
+let term: Terminal | null = null;
+let fit: FitAddon | null = null;
+let termWs: WebSocket | null = null;
+let mode: 'chat' | 'tmux' = 'chat';
+
+const termEl = document.createElement('div');
+termEl.id = 'terminal';
+termEl.hidden = true;
+main.appendChild(termEl);
+
+const toolbar = document.createElement('nav');
+toolbar.id = 'toolbar';
+toolbar.hidden = true;
+toolbar.innerHTML = ['esc:Esc', 'tab:Tab', 'ctrlc:^C', 'up:↑', 'down:↓', 'left:←', 'right:→', 'pageup:⤒', 'pagedown:⤓']
+  .map((s) => { const [k, l] = s.split(':'); return `<button data-key="${k}">${l}</button>`; }).join('');
+main.appendChild(toolbar);
+
+const modeToggle = document.createElement('button');
+modeToggle.id = 'mode-toggle';
+modeToggle.hidden = true;
+main.appendChild(modeToggle);
+modeToggle.addEventListener('click', () => showMode(mode === 'chat' ? 'tmux' : 'chat'));
+
+const b64ToBytes = (s: string): Uint8Array => {
+  const bin = atob(s);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+};
+const TERM_KEYS: Record<string, string> = { esc: '\x1b', tab: '\t', ctrlc: '\x03', up: '\x1b[A', down: '\x1b[B', left: '\x1b[D', right: '\x1b[C' };
+function termSend(data: string): void { if (termWs?.readyState === WebSocket.OPEN) termWs.send(JSON.stringify({ type: 'input', data })); }
+for (const btn of Array.from(toolbar.querySelectorAll('button'))) {
+  const key = (btn as HTMLElement).dataset.key ?? '';
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (key === 'pageup') term?.scrollPages(-1);
+    else if (key === 'pagedown') term?.scrollPages(1);
+    else if (TERM_KEYS[key]) termSend(TERM_KEYS[key]);
+    term?.focus();
+  });
+}
+let tY = 0, tAcc = 0;
+termEl.addEventListener('touchstart', (e) => { tY = e.touches[0].clientY; tAcc = 0; }, { passive: true });
+termEl.addEventListener('touchmove', (e) => {
+  tAcc += e.touches[0].clientY - tY; tY = e.touches[0].clientY;
+  while (Math.abs(tAcc) >= 16) { term?.scrollLines(tAcc > 0 ? -1 : 1); tAcc += tAcc > 0 ? -16 : 16; }
+  e.preventDefault();
+}, { passive: false });
+
+function closeTerminal(): void { termWs?.close(); termWs = null; term?.dispose(); term = null; }
+function connectTerminal(): void {
+  if (!current) return;
+  closeTerminal();
+  term = new Terminal({ cursorBlink: true, fontSize: 13, scrollback: 5000, fontFamily: 'ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace', theme: { background: '#0d1117' }, allowProposedApi: true });
+  fit = new FitAddon();
+  term.loadAddon(fit);
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = '11';
+  term.open(termEl);
+  fit.fit();
+  termWs = new WebSocket(wsUrl(current.host, '/ws/terminal', { session: current.session.name, cols: String(term.cols), rows: String(term.rows) }));
+  termWs.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'output') term!.write(b64ToBytes(m.data));
+    else if (m.type === 'closed') term!.write(`\r\n[${m.reason}]\r\n`);
+  };
+  term.onData((d) => termSend(d));
+  window.addEventListener('resize', () => {
+    if (mode !== 'tmux') return;
+    fit?.fit();
+    if (term && termWs?.readyState === WebSocket.OPEN) termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+  });
+}
+
+function showMode(m: 'chat' | 'tmux'): void {
+  mode = m;
+  localStorage.setItem('ap.mode', m);
+  modeToggle.textContent = m === 'chat' ? '⌗ tmux' : '💬 chat';
+  if (m === 'chat') {
+    closeTerminal();
+    termEl.hidden = true; toolbar.hidden = true;
+    chatEl.hidden = false; chatForm.hidden = false; chaptersSection.hidden = false;
+    connectChat();
+    void loadCommands();
+  } else {
+    closeChat();
+    chatEl.hidden = true; chatForm.hidden = true; chaptersSection.hidden = true;
+    statusbar.hidden = true; thinkingEl.hidden = true; cmdMenu.hidden = true;
+    termEl.hidden = false; toolbar.hidden = false;
+    connectTerminal();
+  }
+}
+
 // ── hosts / discovery ───────────────────────────────────────────────────────
 async function discoverHosts(): Promise<Host[]> {
   const hosts: Host[] = [];
@@ -264,12 +362,9 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   activeEl = el;
   current = { host, session };
   placeholder.style.display = 'none';
-  chatEl.hidden = false;
-  chatForm.hidden = false;
-  chaptersSection.hidden = false;
+  modeToggle.hidden = false;
   localStorage.setItem('ap.session', JSON.stringify({ hostUrl: host.url, sessionName: session.name }));
-  connectChat();
-  void loadCommands();
+  showMode(localStorage.getItem('ap.mode') === 'tmux' ? 'tmux' : 'chat');
   if (isMobile()) closeMenu(); // picking a session collapses the drawer on mobile
 }
 
@@ -361,11 +456,14 @@ const summarize = (tool: string, input: any): string => {
 const clip = (s: string, n = 4000): string => (s.length > n ? s.slice(0, n) + `\n… (${s.length - n} more chars)` : s);
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// date + time stamp in Korea Standard Time, e.g. "23 Jun, 14:32"
+// date + time stamp in Korea Standard Time, formatted YY/MM/DD HH:MM
 const kstStamp = (ts?: string): string => {
   if (!ts) return '';
-  try { return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Seoul', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); }
-  catch { return ''; }
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(ts));
+    const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+    return `${g('year')}/${g('month')}/${g('day')} ${g('hour')}:${g('minute')}`;
+  } catch { return ''; }
 };
 const kstFull = (ts?: string): string => {
   if (!ts) return '';

@@ -130,7 +130,14 @@ body.hide-results .tr { display: none; }
 /* attach button (override the blue Send styling) */
 #chatinput #attach { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; background: transparent; color: #7d8590; border: 1px solid #30363d; border-radius: 8px; padding: 0 10px; cursor: pointer; }
 
+/* tmux (terminal) view */
+#terminal { flex: 1; min-height: 0; padding: 6px; }
+#toolbar { flex-shrink: 0; display: flex; gap: 4px; padding: 6px; border-top: 1px solid #21262d; overflow-x: auto; }
+#toolbar button { flex: 0 0 auto; min-width: 40px; height: 38px; background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; font-size: 15px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+#toolbar button:active { background: #30363d; }
+
 /* floating controls within #main */
+#mode-toggle { position: absolute; top: 8px; left: 8px; z-index: 40; background: rgba(13,17,23,.7); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: #e6edf3; border: 1px solid rgba(230,237,243,.35); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
 #scrollbottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: 78px; z-index: 40; width: 38px; height: 38px; border-radius: 50%; background: #1f6feb; color: #fff; border: 0; font-size: 18px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
 /* chapters: sidebar "Messages" section with its own scroll */
 #chapters-section { border-top: 1px solid #21262d; flex: 1; min-height: 0; display: flex; flex-direction: column; }

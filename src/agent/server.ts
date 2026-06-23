@@ -217,8 +217,20 @@ export function startAgent(cfg: Config): { close: () => void } {
       if (ws.readyState === WebSocket.OPEN) ws.send(encode({ type: 'chat', events }));
     });
 
-    // Serialize sends so rapidly-queued messages don't interleave: each
-    // message's text + Enter completes (plus a small gap) before the next.
+    const BUSY_RE = /…[^\n]*tokens\)|esc to interrupt/i;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const isAgentBusy = async () => BUSY_RE.test(await paneVisible(pane));
+    const waitFor = async (want: boolean, timeoutMs: number) => {
+      for (let t = 0; t < timeoutMs; t += 250) {
+        if ((await isAgentBusy()) === want) return true;
+        await sleep(250);
+      }
+      return false;
+    };
+
+    // Deliver each message as its OWN turn: wait until the agent is idle (ready
+    // for input), paste + Enter, then wait until it starts working — so rapidly
+    // queued messages stay separate instead of lumping into one input.
     let queue: Promise<void> = Promise.resolve();
     ws.on('message', (raw) => {
       try {
@@ -226,9 +238,10 @@ export function startAgent(cfg: Config): { close: () => void } {
         if (msg.type === 'input') {
           const data = msg.data;
           queue = queue.then(async () => {
+            await waitFor(false, 180000); // agent ready
             await sendText(pane, data); // bracketed paste (multi-line safe)
             await sendEnter(pane);
-            await new Promise((r) => setTimeout(r, 150));
+            await waitFor(true, 4000); // it picked the message up before the next
           });
         }
       } catch {
@@ -241,7 +254,6 @@ export function startAgent(cfg: Config): { close: () => void } {
     let busy = false;
     let idle = 0;
     let lastStatus = '';
-    const BUSY_RE = /…[^\n]*tokens\)|esc to interrupt/i;
     const statusPoll = setInterval(async () => {
       const text = await paneVisible(pane);
       if (BUSY_RE.test(text)) { idle = 0; busy = true; }
