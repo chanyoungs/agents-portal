@@ -21,6 +21,7 @@ const sidebar = $('sidebar');
 let activeEl: HTMLElement | null = null;
 let current: { host: Host; session: SessionInfo } | null = null;
 let chatWs: WebSocket | null = null;
+let pending: { text: string; el: HTMLElement }[] = [];
 
 // ── mobile menu (sidebar drawer) ─────────────────────────────────────────────
 const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
@@ -59,6 +60,7 @@ chatForm.addEventListener('submit', (e) => {
   const text = chatbox.value;
   if (!text.trim() || chatWs?.readyState !== WebSocket.OPEN) return;
   chatWs.send(JSON.stringify({ type: 'input', data: text }));
+  addPending(text.trim()); // show immediately as "queued" until it lands in the transcript
   chatbox.value = '';
   chatbox.style.height = 'auto';
 });
@@ -131,6 +133,7 @@ function connectChat(): void {
   if (!current) return;
   closeChat();
   chatEl.innerHTML = '';
+  pending = [];
   chatWs = new WebSocket(wsUrl(current.host, '/ws/chat', { session: current.session.name }));
   chatWs.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
@@ -141,10 +144,37 @@ function connectChat(): void {
     if (msg.type !== 'chat') return;
     const nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
     const frag = document.createDocumentFragment();
-    for (const e of msg.events as ChatEvent[]) frag.appendChild(renderEvent(e));
+    for (const e of msg.events as ChatEvent[]) {
+      resolvePending(e); // a real user message arriving clears its queued placeholder
+      frag.appendChild(renderEvent(e));
+    }
+    // keep queued placeholders at the bottom, after newly-rendered events
+    for (const p of pending) frag.appendChild(p.el);
     chatEl.appendChild(frag);
     if (nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
   };
+}
+
+// optimistic "queued" message, shown until the transcript reports it
+function addPending(text: string): void {
+  const el = document.createElement('div');
+  el.className = 'msg user pending';
+  el.innerHTML = `<div class="who">You <span class="queued">queued</span></div><div class="bubble"></div>`;
+  el.querySelector('.bubble')!.textContent = text;
+  pending.push({ text, el });
+  chatEl.appendChild(el);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+const eventUserText = (e: ChatEvent): string =>
+  e.blocks.filter((b) => b.kind === 'text').map((b) => b.text ?? '').join('').trim();
+
+function resolvePending(e: ChatEvent): void {
+  if (e.role !== 'user' || pending.length === 0) return;
+  const t = eventUserText(e);
+  if (!t) return;
+  const i = pending.findIndex((p) => p.text === t);
+  if (i >= 0) { pending[i].el.remove(); pending.splice(i, 1); }
 }
 
 const summarize = (tool: string, input: any): string => {

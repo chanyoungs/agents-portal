@@ -62,6 +62,8 @@ body.hide-results .tr { display: none; }
 .msg { margin: 0 0 16px; max-width: min(760px, 100%); overflow-wrap: anywhere; }
 .msg .bubble { overflow-wrap: anywhere; word-break: break-word; }
 .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #7d8590; margin-bottom: 4px; }
+.msg.pending { opacity: .55; }
+.msg.pending .queued { color: #d29922; border: 1px solid #d29922; border-radius: 4px; font-size: 9px; padding: 0 4px; margin-left: 6px; letter-spacing: .02em; }
 .msg.user .bubble { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 8px 12px; }
 .msg .bubble :first-child { margin-top: 0; }
 .msg .bubble :last-child { margin-bottom: 0; }
