@@ -22,6 +22,8 @@ let activeEl: HTMLElement | null = null;
 let current: { host: Host; session: SessionInfo } | null = null;
 let chatWs: WebSocket | null = null;
 let pending: { text: string; el: HTMLElement }[] = [];
+let commands: { name: string; builtin: boolean }[] = [];
+let prompts: { text: string; el: HTMLElement }[] = []; // user messages, for the chapters menu
 
 // ── mobile menu (sidebar drawer) ─────────────────────────────────────────────
 const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
@@ -36,12 +38,13 @@ function setupFilters(): void {
   const bar = document.createElement('div');
   bar.id = 'filters';
   for (const [cls, label] of [['hide-tools', 'tool calls'], ['hide-results', 'results']] as const) {
-    if (localStorage.getItem('ap.' + cls) === '1') document.body.classList.add(cls);
+    // hidden by default; respect an explicit "shown" choice
+    if (localStorage.getItem('ap.' + cls) !== '0') document.body.classList.add(cls);
     const btn = document.createElement('button');
     const sync = () => {
-      const on = document.body.classList.contains(cls);
-      btn.textContent = `${on ? 'Show' : 'Hide'} ${label}`;
-      btn.classList.toggle('active', on);
+      const hidden = document.body.classList.contains(cls);
+      btn.textContent = `${hidden ? 'Show' : 'Hide'} ${label}`;
+      btn.classList.toggle('active', !hidden); // highlight when shown
     };
     btn.addEventListener('click', () => {
       const on = document.body.classList.toggle(cls);
@@ -68,20 +71,129 @@ chatbox.addEventListener('input', () => {
   chatbox.style.height = 'auto';
   chatbox.style.height = Math.min(chatbox.scrollHeight, window.innerHeight * 0.4) + 'px';
 });
-// Desktop: Enter sends, Shift+Enter inserts a newline. (Mobile keeps Enter = newline; tap Send.)
+// "working…" indicator + slash-command menu, just above the input bar.
+const thinkingEl = document.createElement('div');
+thinkingEl.id = 'thinking';
+thinkingEl.hidden = true;
+thinkingEl.innerHTML = '<span class="spin">✻</span> working…';
+chatForm.parentElement!.insertBefore(thinkingEl, chatForm);
+
+const cmdMenu = document.createElement('div');
+cmdMenu.id = 'cmdmenu';
+cmdMenu.hidden = true;
+chatForm.parentElement!.insertBefore(cmdMenu, chatForm);
+
+// attach button + hidden file input inside the input bar
+const fileInput = document.createElement('input');
+fileInput.type = 'file';
+fileInput.multiple = true;
+fileInput.hidden = true;
+const attachBtn = document.createElement('button');
+attachBtn.type = 'button';
+attachBtn.id = 'attach';
+attachBtn.title = 'Attach file';
+attachBtn.textContent = '📎';
+chatForm.insertBefore(attachBtn, chatbox);
+chatForm.appendChild(fileInput);
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  for (const f of Array.from(fileInput.files ?? [])) await uploadFile(f);
+  fileInput.value = '';
+});
+
+chatbox.addEventListener('input', updateCmdMenu);
 chatbox.addEventListener('keydown', (e) => {
+  if (!cmdMenu.hidden) {
+    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      e.preventDefault();
+      (cmdMenu.querySelector('.cmd-item') as HTMLElement | null)?.click();
+      return;
+    }
+    if (e.key === 'Escape') { cmdMenu.hidden = true; return; }
+  }
+  // Desktop: Enter sends, Shift+Enter newline. (Mobile keeps Enter = newline; tap Send.)
   if (e.key === 'Enter' && !e.shiftKey && !isMobile()) {
     e.preventDefault();
     chatForm.requestSubmit();
   }
 });
 
-// "working…" indicator, driven by the agent's busy state (server status events)
-const thinkingEl = document.createElement('div');
-thinkingEl.id = 'thinking';
-thinkingEl.hidden = true;
-thinkingEl.innerHTML = '<span class="spin">✻</span> working…';
-chatForm.parentElement!.insertBefore(thinkingEl, chatForm);
+function updateCmdMenu(): void {
+  const m = chatbox.value.match(/^\/(\S*)$/); // only while typing a leading /command
+  if (!m) { cmdMenu.hidden = true; return; }
+  const q = m[1].toLowerCase();
+  const matches = commands.filter((c) => c.name.toLowerCase().startsWith(q)).slice(0, 8);
+  if (matches.length === 0) { cmdMenu.hidden = true; return; }
+  cmdMenu.innerHTML = '';
+  for (const c of matches) {
+    const it = document.createElement('div');
+    it.className = 'cmd-item';
+    it.innerHTML = `<span class="cmd-name">/${c.name}</span>${c.builtin ? '' : '<span class="cmd-src">custom</span>'}`;
+    it.addEventListener('click', () => { chatbox.value = `/${c.name} `; cmdMenu.hidden = true; chatbox.focus(); });
+    cmdMenu.appendChild(it);
+  }
+  cmdMenu.hidden = false;
+}
+
+async function uploadFile(f: File): Promise<void> {
+  if (!current) return;
+  const url = `${current.host.url}/api/upload?session=${encodeURIComponent(current.session.name)}&name=${encodeURIComponent(f.name)}`;
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { ...authHeaders(current.host), 'Content-Type': 'application/octet-stream' }, body: f });
+    if (!res.ok) return;
+    const { path } = await res.json();
+    const cur = chatbox.value;
+    chatbox.value = (cur && !cur.endsWith(' ') ? cur + ' ' : cur) + path + ' ';
+    chatbox.focus();
+    chatbox.dispatchEvent(new Event('input'));
+  } catch { /* ignore */ }
+}
+
+async function loadCommands(): Promise<void> {
+  commands = [];
+  if (!current) return;
+  try {
+    const res = await fetch(`${current.host.url}/api/commands?session=${encodeURIComponent(current.session.name)}`, { headers: authHeaders(current.host) });
+    if (res.ok) commands = await res.json();
+  } catch { /* ignore */ }
+}
+
+// scroll-to-bottom button (shown when the chat isn't near the bottom)
+const main = chatEl.parentElement!;
+const scrollBtn = document.createElement('button');
+scrollBtn.id = 'scrollbottom';
+scrollBtn.title = 'Scroll to bottom';
+scrollBtn.textContent = '↓';
+scrollBtn.hidden = true;
+main.appendChild(scrollBtn);
+scrollBtn.addEventListener('click', () => { chatEl.scrollTop = chatEl.scrollHeight; });
+chatEl.addEventListener('scroll', () => {
+  scrollBtn.hidden = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
+});
+
+// chapters: jump to a previous user message
+const chaptersBtn = document.createElement('button');
+chaptersBtn.id = 'chapters';
+chaptersBtn.title = 'Jump to a message';
+chaptersBtn.textContent = '≡';
+chaptersBtn.hidden = true;
+main.appendChild(chaptersBtn);
+const chapterList = document.createElement('div');
+chapterList.id = 'chapterlist';
+chapterList.hidden = true;
+main.appendChild(chapterList);
+chaptersBtn.addEventListener('click', () => {
+  if (!chapterList.hidden) { chapterList.hidden = true; return; }
+  chapterList.innerHTML = '';
+  for (const p of prompts) {
+    const it = document.createElement('div');
+    it.className = 'chapter-item';
+    it.textContent = p.text.replace(/\s+/g, ' ').slice(0, 70);
+    it.addEventListener('click', () => { p.el.scrollIntoView({ block: 'start', behavior: 'smooth' }); chapterList.hidden = true; });
+    chapterList.appendChild(it);
+  }
+  chapterList.hidden = prompts.length === 0;
+});
 
 // ── hosts / discovery ───────────────────────────────────────────────────────
 async function discoverHosts(): Promise<Host[]> {
@@ -131,7 +243,9 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   placeholder.style.display = 'none';
   chatEl.hidden = false;
   chatForm.hidden = false;
+  chaptersBtn.hidden = false;
   connectChat();
+  void loadCommands();
   if (isMobile()) closeMenu(); // picking a session collapses the drawer on mobile
 }
 
@@ -148,7 +262,9 @@ function connectChat(): void {
   closeChat();
   chatEl.innerHTML = '';
   pending = [];
+  prompts = [];
   thinkingEl.hidden = true;
+  let firstBatch = true; // don't animate the initial history dump
   chatWs = new WebSocket(wsUrl(current.host, '/ws/chat', { session: current.session.name }));
   chatWs.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
@@ -162,19 +278,22 @@ function connectChat(): void {
     const frag = document.createDocumentFragment();
     for (const e of msg.events as ChatEvent[]) {
       resolvePending(e); // a real user message arriving clears its queued placeholder
-      frag.appendChild(renderEvent(e));
+      const el = renderEvent(e);
+      if (!firstBatch) el.classList.add('fade-in'); // animate live messages
+      frag.appendChild(el);
     }
     // keep queued placeholders at the bottom, after newly-rendered events
     for (const p of pending) frag.appendChild(p.el);
     chatEl.appendChild(frag);
     if (nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
+    firstBatch = false;
   };
 }
 
 // optimistic "queued" message, shown until the transcript reports it
 function addPending(text: string): void {
   const el = document.createElement('div');
-  el.className = 'msg user pending';
+  el.className = 'msg user pending fade-in';
   el.innerHTML = `<div class="who">You <span class="queued">queued</span></div><div class="bubble"></div>`;
   el.querySelector('.bubble')!.textContent = text;
   pending.push({ text, el });
@@ -215,6 +334,8 @@ function renderEvent(e: ChatEvent): HTMLElement {
     who.className = 'who';
     who.textContent = 'You';
     wrap.appendChild(who);
+    const t = eventUserText(e);
+    if (t) prompts.push({ text: t, el: wrap }); // for the chapters menu
   }
   for (const b of e.blocks) {
     if (b.kind === 'text' && b.text) {

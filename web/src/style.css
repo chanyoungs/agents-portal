@@ -114,6 +114,27 @@ body.hide-results .tr { display: none; }
   cursor: pointer;
 }
 
+/* slash-command autocomplete menu */
+#cmdmenu { flex-shrink: 0; max-height: 40vh; overflow-y: auto; border-top: 1px solid #21262d; background: #0d1117; }
+.cmd-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; cursor: pointer; font-size: 14px; }
+.cmd-item:hover { background: #161b22; }
+.cmd-name { color: #58a6ff; font-family: ui-monospace, "DejaVu Sans Mono", monospace; }
+.cmd-src { color: #7d8590; font-size: 11px; }
+
+/* attach button (override the blue Send styling) */
+#chatinput #attach { flex: 0 0 auto; background: transparent; color: #7d8590; border: 1px solid #30363d; border-radius: 8px; padding: 0 10px; font-size: 16px; cursor: pointer; }
+
+/* floating controls within #main */
+#scrollbottom { position: absolute; right: 14px; bottom: 78px; z-index: 40; width: 38px; height: 38px; border-radius: 50%; background: #1f6feb; color: #fff; border: 0; font-size: 18px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+#chapters { position: absolute; top: 8px; left: 8px; z-index: 40; width: 36px; height: 36px; border-radius: 8px; background: transparent; color: #e6edf3; border: 1px solid rgba(230,237,243,.35); font-size: 18px; cursor: pointer; }
+#chapterlist { position: absolute; top: 50px; left: 8px; z-index: 60; width: min(340px, 80%); max-height: 60vh; overflow-y: auto; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+.chapter-item { padding: 8px 12px; border-bottom: 1px solid #161b22; cursor: pointer; font-size: 13px; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chapter-item:hover { background: #161b22; }
+
+/* fade-in for newly arriving messages */
+.fade-in { animation: fadein .28s ease; }
+@keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
 /* desktop: centre the chat column with side padding */
 @media (min-width: 641px) {
   #chat { padding-inline: max(16px, calc((100% - 760px) / 2)); }

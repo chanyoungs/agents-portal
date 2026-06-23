@@ -17,6 +17,7 @@ import type { Config } from '../config.js';
 import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw, sendEnter, findAgentPane, paneVisible } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
 import { findClaudeTranscript, TranscriptTailer } from './transcript.js';
+import { listCommands } from './commands.js';
 import {
   PROTOCOL_VERSION,
   decode,
@@ -144,6 +145,28 @@ export function startAgent(cfg: Config): { close: () => void } {
   app.get('/api/hosts', async (req, res) => {
     if (!authed(req)) return res.sendStatus(401);
     res.json(await listPeers());
+  });
+
+  // Slash commands for autocomplete (built-ins + this session's custom commands).
+  app.get('/api/commands', async (req, res) => {
+    if (!authed(req)) return res.sendStatus(401);
+    const session = String(req.query.session ?? '');
+    res.json(listCommands(session ? await sessionCwd(session) : ''));
+  });
+
+  // Upload a file from the browser to the session's cwd; returns its path so
+  // the user can reference it to the agent. Raw body (no multipart dep).
+  app.post('/api/upload', express.raw({ type: () => true, limit: '200mb' }), async (req, res) => {
+    if (!authed(req)) return res.sendStatus(401);
+    const session = String(req.query.session ?? '');
+    const cwd = session ? await sessionCwd(session) : '';
+    if (!cwd) return res.status(400).json({ error: 'unknown session cwd' });
+    const safe = String(req.query.name ?? 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'file';
+    const dir = join(cwd, '.agents-portal', 'uploads');
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${Date.now()}-${safe}`);
+    writeFileSync(file, req.body as Buffer);
+    res.json({ path: file });
   });
 
   const webRoot = findWebRoot();
