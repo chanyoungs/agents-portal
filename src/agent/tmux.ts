@@ -67,6 +67,22 @@ export async function capturePane(session: string, lines = 3000): Promise<string
   }
 }
 
+/**
+ * Create a grouped session sharing `target`'s windows, so a web client gets its
+ * own view (independent current window + size) without disturbing other clients.
+ * Mouse on (clicks/scroll work); auto-destroyed when the web client detaches.
+ */
+export async function newGroupedSession(name: string, target: string): Promise<void> {
+  await exec('tmux', ['new-session', '-d', '-s', name, '-t', target]);
+  for (const opt of [['mouse', 'on'], ['destroy-unattached', 'on']]) {
+    try { await exec('tmux', ['set-option', '-t', name, opt[0], opt[1]]); } catch { /* non-fatal */ }
+  }
+}
+
+export async function killSession(name: string): Promise<void> {
+  try { await exec('tmux', ['kill-session', '-t', name]); } catch { /* may already be gone */ }
+}
+
 /** Visible (no scrollback) text of a pane — used to detect the busy spinner. */
 export async function paneVisible(target: string): Promise<string> {
   try {

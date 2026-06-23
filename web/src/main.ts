@@ -238,11 +238,12 @@ const b64ToBytes = (s: string): Uint8Array => {
   return arr;
 };
 function termSend(data: string): void { if (termWs?.readyState === WebSocket.OPEN) termWs.send(JSON.stringify({ type: 'input', data })); }
+// Touch-drag scrolls via tmux mouse wheel (the real tmux client owns scrollback).
 let tY = 0, tAcc = 0;
 termEl.addEventListener('touchstart', (e) => { tY = e.touches[0].clientY; tAcc = 0; }, { passive: true });
 termEl.addEventListener('touchmove', (e) => {
   tAcc += e.touches[0].clientY - tY; tY = e.touches[0].clientY;
-  while (Math.abs(tAcc) >= 16) { term?.scrollLines(tAcc > 0 ? -1 : 1); tAcc += tAcc > 0 ? -16 : 16; }
+  while (Math.abs(tAcc) >= 16) { termSend(tAcc > 0 ? '\x1b[<64;1;1M' : '\x1b[<65;1;1M'); tAcc += tAcc > 0 ? -16 : 16; }
   e.preventDefault();
 }, { passive: false });
 

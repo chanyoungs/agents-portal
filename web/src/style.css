@@ -1,5 +1,9 @@
-* { box-sizing: border-box; }
+* { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #30363d transparent; }
 [hidden] { display: none !important; } /* beat display:flex on #chatinput etc. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
 html, body { height: 100%; margin: 0; }
 body {
   display: flex;
