@@ -15,8 +15,21 @@
       <ul id="hosts"></ul>
     </aside>
     <main id="main">
-      <div id="terminal"></div>
-      <div id="placeholder">Add a host, then pick a session.</div>
+      <div id="topbar" hidden>
+        <span id="session-label"></span>
+        <span class="spacer"></span>
+        <button data-view="chat" class="active">Chat</button>
+        <button data-view="term">Terminal</button>
+      </div>
+
+      <div id="chat" hidden></div>
+      <div id="terminal" hidden></div>
+      <div id="placeholder">Pick a session.</div>
+
+      <form id="chatinput" hidden>
+        <textarea id="chatbox" rows="1" placeholder="Message the agent…"></textarea>
+        <button type="submit">Send</button>
+      </form>
       <nav id="toolbar" hidden>
         <button data-key="esc">Esc</button>
         <button data-key="tab">Tab</button>

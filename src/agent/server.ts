@@ -14,8 +14,9 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Config } from '../config.js';
-import { listSessions, capturePane, startPipe, stopPipe, resizeWindow, sendRaw } from './tmux.js';
+import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
+import { findClaudeTranscript, TranscriptTailer } from './transcript.js';
 import {
   PROTOCOL_VERSION,
   decode,
@@ -153,18 +154,59 @@ export function startAgent(cfg: Config): { close: () => void } {
 
   const server = createServer(app);
   const streams = new Map<string, SessionStream>();
+  const tailers = new Map<string, TranscriptTailer>();
 
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '', 'http://localhost');
-    if (url.pathname !== '/ws/terminal') return socket.destroy();
+    if (url.pathname !== '/ws/terminal' && url.pathname !== '/ws/chat') return socket.destroy();
     const ok = !!authLogin(req.headers) || url.searchParams.get('token') === cfg.token;
     if (!ok) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       return socket.destroy();
     }
-    wss.handleUpgrade(req, socket, head, (ws) => bridge(ws, req));
+    const handler = url.pathname === '/ws/chat' ? chatBridge : bridge;
+    wss.handleUpgrade(req, socket, head, (ws) => handler(ws, req));
   });
+
+  // Conversation view: tail the agent's transcript and stream chat events.
+  async function chatBridge(ws: WebSocket, req: IncomingMessage): Promise<void> {
+    const url = new URL(req.url ?? '', 'http://localhost');
+    const session = url.searchParams.get('session');
+    if (!session) return ws.close();
+    const cwd = await sessionCwd(session);
+    const file = findClaudeTranscript(cwd);
+    if (!file) {
+      ws.send(encode({ type: 'chat-error', reason: `no Claude transcript for ${cwd}` }));
+      return ws.close();
+    }
+
+    let tailer = tailers.get(file);
+    if (!tailer) {
+      tailer = new TranscriptTailer(file);
+      tailer.start();
+      tailers.set(file, tailer);
+    }
+    const unsub = tailer.subscribe((events) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(encode({ type: 'chat', events }));
+    });
+
+    ws.on('message', (raw) => {
+      try {
+        const msg = decode<ClientToAgent>(raw as Buffer);
+        if (msg.type === 'input') void sendRaw(session, msg.data);
+      } catch {
+        /* ignore */
+      }
+    });
+    ws.on('close', () => {
+      unsub();
+      if (tailer!.subscriberCount === 0) {
+        tailer!.stop();
+        tailers.delete(file);
+      }
+    });
+  }
 
   async function bridge(ws: WebSocket, req: IncomingMessage): Promise<void> {
     const url = new URL(req.url ?? '', 'http://localhost');

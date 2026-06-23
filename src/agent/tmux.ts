@@ -36,6 +36,16 @@ export async function listSessions(): Promise<SessionInfo[]> {
   }
 }
 
+/** Current working directory of a session's active pane. */
+export async function sessionCwd(session: string): Promise<string> {
+  try {
+    const { stdout } = await exec('tmux', ['display-message', '-p', '-t', session, '#{pane_current_path}']);
+    return stdout.trim();
+  } catch {
+    return '';
+  }
+}
+
 export async function sessionExists(name: string): Promise<boolean> {
   try {
     await exec('tmux', ['has-session', '-t', name]);
