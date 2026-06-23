@@ -33,6 +33,30 @@ let activeEl: HTMLElement | null = null;
 
 document.getElementById('add-host')!.addEventListener('click', addHostPrompt);
 setupToolbar();
+setupTouchScroll();
+
+const WHEEL_UP = '\x1b[<64;1;1M';
+const WHEEL_DOWN = '\x1b[<65;1;1M';
+
+// Finger-drag scrolling: xterm doesn't translate touch into the app's
+// mouse-wheel events, so we do it. tmux mouse mode (on by the agent) turns
+// these wheel escapes into scrollback movement. Drag down = older content.
+function setupTouchScroll(): void {
+  let lastY = 0;
+  let accum = 0;
+  const STEP = 22; // px per wheel notch
+  termEl.addEventListener('touchstart', (e) => { lastY = e.touches[0].clientY; accum = 0; }, { passive: true });
+  termEl.addEventListener('touchmove', (e) => {
+    const y = e.touches[0].clientY;
+    accum += y - lastY;
+    lastY = y;
+    while (Math.abs(accum) >= STEP) {
+      if (accum > 0) { send(WHEEL_UP); accum -= STEP; }
+      else { send(WHEEL_DOWN); accum += STEP; }
+    }
+    e.preventDefault(); // stop the page itself from scrolling
+  }, { passive: false });
+}
 
 function send(data: string): void {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
