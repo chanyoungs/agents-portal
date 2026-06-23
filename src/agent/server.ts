@@ -235,20 +235,35 @@ export function startAgent(cfg: Config): { close: () => void } {
         /* ignore */
       }
     });
-    // Detect the agent's "working" state from its TUI spinner line and stream
-    // it to the UI. Busy is reported immediately; idle only after it settles
-    // (~1.5s) to ride over the spinner's blink frames.
+    // Stream status parsed from the agent's TUI: working spinner, model name,
+    // context %, and thinking mode. Busy settles (~1.5s) to ride blink frames;
+    // the rest update immediately. Only emit when something changes.
     let busy = false;
     let idle = 0;
+    let lastStatus = '';
     const BUSY_RE = /…[^\n]*tokens\)|esc to interrupt/i;
     const statusPoll = setInterval(async () => {
-      const isBusy = BUSY_RE.test(await paneVisible(pane));
-      if (isBusy) {
-        idle = 0;
-        if (!busy) { busy = true; if (ws.readyState === WebSocket.OPEN) ws.send(encode({ type: 'status', busy })); }
-      } else if (busy && ++idle >= 3) {
-        busy = false;
-        if (ws.readyState === WebSocket.OPEN) ws.send(encode({ type: 'status', busy }));
+      const text = await paneVisible(pane);
+      if (BUSY_RE.test(text)) { idle = 0; busy = true; }
+      else if (busy && ++idle >= 3) busy = false;
+
+      // Parse model/context/thinking only from the footer (last few non-empty
+      // lines) so conversation text can't trigger false matches.
+      const footer = text.split('\n').filter((l) => l.trim()).slice(-6).join('\n');
+      const ctx = footer.match(/Context(?:\s+left)?:\s*([\d.]+)%/i);
+      const model = footer.match(/^\s*([A-Za-z][\w.\- ]*?(?:\([^)]*\))?)\s{2,}Context:/m);
+      const think = footer.match(/\bthinking\b(?:[:\s]+(on|off|\w+))?/i);
+      const payload = {
+        type: 'status',
+        busy,
+        model: model ? model[1].trim() : null,
+        context: ctx ? Number(ctx[1]) : null,
+        thinking: think ? (think[1] ?? 'on') : null,
+      };
+      const sig = JSON.stringify(payload);
+      if (sig !== lastStatus) {
+        lastStatus = sig;
+        if (ws.readyState === WebSocket.OPEN) ws.send(encode(payload));
       }
     }, 500);
 

@@ -79,6 +79,12 @@ thinkingEl.hidden = true;
 thinkingEl.innerHTML = '<span class="spin">✻</span> working…';
 chatForm.parentElement!.insertBefore(thinkingEl, chatForm);
 
+// status bar: model · context % · thinking mode (parsed from the agent's TUI)
+const statusbar = document.createElement('div');
+statusbar.id = 'statusbar';
+statusbar.hidden = true;
+chatForm.parentElement!.insertBefore(statusbar, chatForm);
+
 const cmdMenu = document.createElement('div');
 cmdMenu.id = 'cmdmenu';
 cmdMenu.hidden = true;
@@ -167,7 +173,7 @@ scrollBtn.title = 'Scroll to bottom';
 scrollBtn.textContent = '↓';
 scrollBtn.hidden = true;
 main.appendChild(scrollBtn);
-scrollBtn.addEventListener('click', () => { chatEl.scrollTop = chatEl.scrollHeight; });
+scrollBtn.addEventListener('click', () => { chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' }); });
 chatEl.addEventListener('scroll', () => {
   scrollBtn.hidden = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
 });
@@ -180,10 +186,12 @@ chaptersSection.innerHTML = '<div class="sec-title">Messages</div><ul id="chapte
 sidebar.appendChild(chaptersSection);
 const chapterListEl = chaptersSection.querySelector('#chapter-list')!;
 
-function addChapter(text: string, target: HTMLElement): void {
+function addChapter(text: string, target: HTMLElement, ts?: string): void {
   const li = document.createElement('li');
   li.className = 'chapter-item';
-  li.textContent = text.replace(/\s+/g, ' ').slice(0, 60);
+  li.innerHTML = `<span class="ch-text"></span>${ts ? `<span class="ch-ts">${kstTime(ts)}</span>` : ''}`;
+  li.querySelector('.ch-text')!.textContent = text.replace(/\s+/g, ' ').slice(0, 60);
+  if (ts) li.title = kstFull(ts);
   li.addEventListener('click', () => {
     target.scrollIntoView({ block: 'start', behavior: 'smooth' });
     if (isMobile()) closeMenu();
@@ -243,10 +251,9 @@ function restoreSession(): void {
   if (!raw) return;
   try {
     const { hostUrl, sessionName } = JSON.parse(raw);
-    const li = hostsEl.querySelector(
-      `.session[data-host="${CSS.escape(hostUrl)}"][data-session="${CSS.escape(sessionName)}"]`,
-    ) as HTMLElement | null;
-    li?.click();
+    for (const li of Array.from(hostsEl.querySelectorAll<HTMLElement>('.session'))) {
+      if (li.dataset.host === hostUrl && li.dataset.session === sessionName) { li.click(); return; }
+    }
   } catch { /* ignore */ }
 }
 
@@ -281,6 +288,7 @@ function connectChat(): void {
   pending = [];
   chapterListEl.innerHTML = '';
   thinkingEl.hidden = true;
+  statusbar.hidden = true;
   let firstBatch = true; // don't animate the initial history dump
   chatWs = new WebSocket(wsUrl(current.host, '/ws/chat', { session: current.session.name }));
   chatWs.onmessage = (ev) => {
@@ -289,7 +297,16 @@ function connectChat(): void {
       chatEl.innerHTML = '<div class="empty">No conversation transcript for this session.</div>';
       return;
     }
-    if (msg.type === 'status') { thinkingEl.hidden = !msg.busy; return; }
+    if (msg.type === 'status') {
+      thinkingEl.hidden = !msg.busy;
+      const parts: string[] = [];
+      if (msg.model) parts.push(msg.model);
+      if (msg.context != null) parts.push(`${msg.context}% context`);
+      if (msg.thinking) parts.push(`thinking: ${msg.thinking}`);
+      statusbar.textContent = parts.join('  ·  ');
+      statusbar.hidden = parts.length === 0;
+      return;
+    }
     if (msg.type !== 'chat') return;
     const nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
     const frag = document.createDocumentFragment();
@@ -343,19 +360,36 @@ const summarize = (tool: string, input: any): string => {
 const clip = (s: string, n = 4000): string => (s.length > n ? s.slice(0, n) + `\n… (${s.length - n} more chars)` : s);
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// timestamps in Korea Standard Time
+const kstTime = (ts?: string): string => {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }); }
+  catch { return ''; }
+};
+const kstFull = (ts?: string): string => {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Seoul', hour12: false }) + ' KST'; }
+  catch { return ''; }
+};
+
 function renderEvent(e: ChatEvent): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = `msg ${e.role}`;
   // A "user" event that is only tool_result blocks is tool output, not a person.
   const isToolOutput = e.role === 'user' && e.blocks.length > 0 && e.blocks.every((b) => b.kind === 'tool_result');
-  // Label only genuine user messages; agent replies are unlabelled.
-  if (e.role === 'user' && !isToolOutput) {
+  const showUser = e.role === 'user' && !isToolOutput;
+  const hasText = e.blocks.some((b) => b.kind === 'text' && b.text);
+  // Header (label + KST time) for genuine user messages and agent text replies.
+  if (showUser || (e.role === 'assistant' && hasText)) {
     const who = document.createElement('div');
     who.className = 'who';
-    who.textContent = 'You';
+    const tsHtml = e.ts ? `<span class="ts" title="${esc(kstFull(e.ts))}">${kstTime(e.ts)}</span>` : '';
+    who.innerHTML = (showUser ? 'You ' : '') + tsHtml;
     wrap.appendChild(who);
+  }
+  if (showUser) {
     const t = eventUserText(e);
-    if (t) addChapter(t, wrap); // sidebar "Messages" jump list
+    if (t) addChapter(t, wrap, e.ts); // sidebar "Messages" jump list
   }
   for (const b of e.blocks) {
     if (b.kind === 'text' && b.text) {
