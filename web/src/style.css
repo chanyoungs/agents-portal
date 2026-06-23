@@ -138,11 +138,12 @@ body.hide-results .tr { display: none; }
 
 /* floating controls within #main */
 #mode-toggle { position: absolute; top: 8px; left: 8px; z-index: 40; background: rgba(13,17,23,.7); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: #e6edf3; border: 1px solid rgba(230,237,243,.35); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-#scrollbottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: 78px; z-index: 40; width: 38px; height: 38px; border-radius: 50%; background: #1f6feb; color: #fff; border: 0; font-size: 18px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+#scrollbottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: 78px; z-index: 40; width: 38px; height: 38px; border-radius: 50%; background: transparent; color: #e6edf3; border: 1px solid rgba(230,237,243,.35); font-size: 18px; cursor: pointer; }
 /* chapters: sidebar "Messages" section with its own scroll */
 #chapters-section { border-top: 1px solid #21262d; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sec-title { flex-shrink: 0; padding: 10px 12px 4px; color: #7d8590; font-size: 12px; text-transform: uppercase; font-weight: 600; }
 #chapter-list { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0 0 8px; }
+.chapter-date { position: sticky; top: 0; background: #0d1117; padding: 6px 12px 2px; color: #6e7681; font-size: 10px; font-weight: 600; letter-spacing: .03em; }
 .chapter-item { display: flex; gap: 8px; align-items: baseline; padding: 7px 12px 7px 20px; cursor: pointer; font-size: 13px; color: #c9d1d9; }
 .chapter-item:hover { background: #161b22; }
 .ch-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

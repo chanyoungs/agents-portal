@@ -189,13 +189,24 @@ chaptersSection.hidden = true;
 chaptersSection.innerHTML = '<div class="sec-title">Messages</div><ul id="chapter-list"></ul>';
 sidebar.appendChild(chaptersSection);
 const chapterListEl = chaptersSection.querySelector('#chapter-list')!;
+let lastChapterDate = '';
 
 function addChapter(text: string, target: HTMLElement, ts?: string): void {
+  if (ts) {
+    const d = kstDate(ts);
+    if (d && d !== lastChapterDate) {
+      lastChapterDate = d;
+      const h = document.createElement('li');
+      h.className = 'chapter-date';
+      h.textContent = d;
+      chapterListEl.appendChild(h);
+    }
+  }
   const li = document.createElement('li');
   li.className = 'chapter-item';
-  li.innerHTML = `<span class="ch-text"></span>${ts ? `<span class="ch-ts">${kstStamp(ts)}</span>` : ''}`;
+  li.innerHTML = `<span class="ch-text"></span>${ts ? `<span class="ch-ts">${kstClock(ts)}</span>` : ''}`;
   li.querySelector('.ch-text')!.textContent = text.replace(/\s+/g, ' ').slice(0, 60);
-  if (ts) li.title = kstFull(ts);
+  li.title = text; // full prompt on hover
   li.addEventListener('click', () => {
     target.scrollIntoView({ block: 'start', behavior: 'smooth' });
     if (isMobile()) closeMenu();
@@ -214,13 +225,6 @@ termEl.id = 'terminal';
 termEl.hidden = true;
 main.appendChild(termEl);
 
-const toolbar = document.createElement('nav');
-toolbar.id = 'toolbar';
-toolbar.hidden = true;
-toolbar.innerHTML = ['esc:Esc', 'tab:Tab', 'ctrlc:^C', 'up:↑', 'down:↓', 'left:←', 'right:→', 'pageup:⤒', 'pagedown:⤓']
-  .map((s) => { const [k, l] = s.split(':'); return `<button data-key="${k}">${l}</button>`; }).join('');
-main.appendChild(toolbar);
-
 const modeToggle = document.createElement('button');
 modeToggle.id = 'mode-toggle';
 modeToggle.hidden = true;
@@ -233,18 +237,7 @@ const b64ToBytes = (s: string): Uint8Array => {
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return arr;
 };
-const TERM_KEYS: Record<string, string> = { esc: '\x1b', tab: '\t', ctrlc: '\x03', up: '\x1b[A', down: '\x1b[B', left: '\x1b[D', right: '\x1b[C' };
 function termSend(data: string): void { if (termWs?.readyState === WebSocket.OPEN) termWs.send(JSON.stringify({ type: 'input', data })); }
-for (const btn of Array.from(toolbar.querySelectorAll('button'))) {
-  const key = (btn as HTMLElement).dataset.key ?? '';
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    if (key === 'pageup') term?.scrollPages(-1);
-    else if (key === 'pagedown') term?.scrollPages(1);
-    else if (TERM_KEYS[key]) termSend(TERM_KEYS[key]);
-    term?.focus();
-  });
-}
 let tY = 0, tAcc = 0;
 termEl.addEventListener('touchstart', (e) => { tY = e.touches[0].clientY; tAcc = 0; }, { passive: true });
 termEl.addEventListener('touchmove', (e) => {
@@ -284,7 +277,7 @@ function showMode(m: 'chat' | 'tmux'): void {
   modeToggle.textContent = m === 'chat' ? '⌗ tmux' : '💬 chat';
   if (m === 'chat') {
     closeTerminal();
-    termEl.hidden = true; toolbar.hidden = true;
+    termEl.hidden = true;
     chatEl.hidden = false; chatForm.hidden = false; chaptersSection.hidden = false;
     connectChat();
     void loadCommands();
@@ -292,7 +285,7 @@ function showMode(m: 'chat' | 'tmux'): void {
     closeChat();
     chatEl.hidden = true; chatForm.hidden = true; chaptersSection.hidden = true;
     statusbar.hidden = true; thinkingEl.hidden = true; cmdMenu.hidden = true;
-    termEl.hidden = false; toolbar.hidden = false;
+    termEl.hidden = false;
     connectTerminal();
   }
 }
@@ -382,6 +375,7 @@ function connectChat(): void {
   chatEl.innerHTML = '';
   pending = [];
   chapterListEl.innerHTML = '';
+  lastChapterDate = '';
   thinkingEl.hidden = true;
   statusbar.hidden = true;
   let firstBatch = true; // don't animate the initial history dump
@@ -456,15 +450,14 @@ const summarize = (tool: string, input: any): string => {
 const clip = (s: string, n = 4000): string => (s.length > n ? s.slice(0, n) + `\n… (${s.length - n} more chars)` : s);
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// date + time stamp in Korea Standard Time, formatted YY/MM/DD HH:MM
-const kstStamp = (ts?: string): string => {
-  if (!ts) return '';
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(ts));
-    const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-    return `${g('year')}/${g('month')}/${g('day')} ${g('hour')}:${g('minute')}`;
-  } catch { return ''; }
+// Korea Standard Time parts → date (YY/MM/DD), time (HH:MM), or both
+const kstParts = (ts: string): Record<string, string> => {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(ts));
+  return Object.fromEntries(parts.map((p) => [p.type, p.value]));
 };
+const kstDate = (ts?: string): string => { try { const g = kstParts(ts!); return `${g.year}/${g.month}/${g.day}`; } catch { return ''; } };
+const kstClock = (ts?: string): string => { try { const g = kstParts(ts!); return `${g.hour}:${g.minute}`; } catch { return ''; } };
+const kstStamp = (ts?: string): string => { try { const g = kstParts(ts!); return `${g.year}/${g.month}/${g.day} ${g.hour}:${g.minute}`; } catch { return ''; } };
 const kstFull = (ts?: string): string => {
   if (!ts) return '';
   try { return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Seoul', hour12: false }) + ' KST'; }
