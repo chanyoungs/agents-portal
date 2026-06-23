@@ -46,6 +46,15 @@ export async function sessionExists(name: string): Promise<boolean> {
   }
 }
 
+/** Enable tmux mouse mode so wheel/scroll events drive copy-mode scrollback. */
+export async function setMouse(session: string, on = true): Promise<void> {
+  try {
+    await exec('tmux', ['set-option', '-t', session, 'mouse', on ? 'on' : 'off']);
+  } catch {
+    // session may have just closed — non-fatal
+  }
+}
+
 /** Send a literal string of keys to a session (used for path injection later). */
 export async function sendKeys(session: string, keys: string, enter = false): Promise<void> {
   await exec('tmux', ['send-keys', '-t', session, keys]);

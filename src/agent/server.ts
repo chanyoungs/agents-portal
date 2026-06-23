@@ -4,7 +4,7 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import type { Config } from '../config.js';
-import { listSessions } from './tmux.js';
+import { listSessions, setMouse } from './tmux.js';
 import {
   PROTOCOL_VERSION,
   decode,
@@ -64,6 +64,9 @@ export function startAgent(cfg: Config): { close: () => void } {
     }
     const cols = Number(url.searchParams.get('cols')) || 80;
     const rows = Number(url.searchParams.get('rows')) || 24;
+
+    // Enable mouse mode so the dashboard's scroll buttons drive tmux scrollback.
+    void setMouse(session, true);
 
     // Attach to the tmux session through a PTY. Multiple clients on the same
     // session share tmux's view (mirrored), which is fine for v1.

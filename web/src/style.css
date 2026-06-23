@@ -44,8 +44,8 @@ body {
 .session.active { background: #1f6feb33; }
 .session .dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
 .session .cwd { color: #7d8590; font-size: 11px; margin-left: auto; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#main { flex: 1; position: relative; min-width: 0; }
-#terminal { position: absolute; inset: 0; padding: 6px; }
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+#terminal { flex: 1; min-height: 0; padding: 6px; }
 #placeholder {
   position: absolute;
   inset: 0;
@@ -54,6 +54,27 @@ body {
   justify-content: center;
   color: #7d8590;
 }
+#toolbar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-top: 1px solid #21262d;
+  overflow-x: auto;
+}
+#toolbar button {
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 38px;
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  font-size: 15px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#toolbar button:active { background: #30363d; }
 
 @media (max-width: 640px) {
   body { flex-direction: column; }

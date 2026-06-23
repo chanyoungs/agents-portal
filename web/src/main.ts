@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 
 // A workstation the dashboard connects to directly over the tailnet.
@@ -23,6 +24,7 @@ const saveHosts = (h: Host[]) => localStorage.setItem(STORE_KEY, JSON.stringify(
 const hostsEl = document.getElementById('hosts')!;
 const placeholder = document.getElementById('placeholder')!;
 const termEl = document.getElementById('terminal')!;
+const toolbar = document.getElementById('toolbar') as HTMLElement;
 
 let term: Terminal | null = null;
 let fit: FitAddon | null = null;
@@ -30,6 +32,37 @@ let ws: WebSocket | null = null;
 let activeEl: HTMLElement | null = null;
 
 document.getElementById('add-host')!.addEventListener('click', addHostPrompt);
+setupToolbar();
+
+function send(data: string): void {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
+}
+
+// On-screen keys for phones (which lack Esc/Ctrl/arrows). Scroll buttons emit
+// mouse-wheel escapes; the agent turns on tmux mouse mode so they scroll
+// tmux's scrollback (xterm's own scrollback is bypassed by tmux's alt-screen).
+const KEYS: Record<string, string> = {
+  esc: '\x1b',
+  tab: '\t',
+  ctrlc: '\x03',
+  up: '\x1b[A',
+  down: '\x1b[B',
+  left: '\x1b[D',
+  right: '\x1b[C',
+  pageup: '\x1b[<64;1;1M'.repeat(3), // wheel-up ×3
+  pagedown: '\x1b[<65;1;1M'.repeat(3), // wheel-down ×3
+};
+
+function setupToolbar(): void {
+  for (const btn of toolbar.querySelectorAll('button')) {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const seq = KEYS[(btn as HTMLElement).dataset.key ?? ''];
+      if (seq) send(seq);
+      term?.focus();
+    });
+  }
+}
 
 function addHostPrompt(): void {
   const url = prompt('Host URL (e.g. https://workstationA.tailnet.ts.net)')?.trim();
@@ -79,10 +112,20 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   el.classList.add('active');
   activeEl = el;
   placeholder.style.display = 'none';
+  toolbar.hidden = false;
 
-  term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: '#0d1117' } });
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: 'ui-monospace, "DejaVu Sans Mono", Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace',
+    theme: { background: '#0d1117' },
+    allowProposedApi: true,
+  });
   fit = new FitAddon();
+  const unicode11 = new Unicode11Addon();
   term.loadAddon(fit);
+  term.loadAddon(unicode11);
+  term.unicode.activeVersion = '11'; // correct wide-glyph widths (powerline, ▶, etc.)
   term.open(termEl);
   fit.fit();
 
@@ -96,7 +139,7 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
     if (msg.type === 'output') term!.write(msg.data);
     else if (msg.type === 'closed') term!.write(`\r\n[${msg.reason}]\r\n`);
   };
-  term.onData((data) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'input', data })));
+  term.onData((data) => send(data));
 
   const onResize = () => {
     fit?.fit();
