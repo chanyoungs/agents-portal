@@ -68,6 +68,13 @@ chatbox.addEventListener('input', () => {
   chatbox.style.height = 'auto';
   chatbox.style.height = Math.min(chatbox.scrollHeight, window.innerHeight * 0.4) + 'px';
 });
+// Desktop: Enter sends, Shift+Enter inserts a newline. (Mobile keeps Enter = newline; tap Send.)
+chatbox.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !isMobile()) {
+    e.preventDefault();
+    chatForm.requestSubmit();
+  }
+});
 
 // ── hosts / discovery ───────────────────────────────────────────────────────
 async function discoverHosts(): Promise<Host[]> {
@@ -240,3 +247,4 @@ function renderToolUse(b: ChatBlock): HTMLElement {
 }
 
 render();
+if (isMobile()) openMenu(); // start with the session list visible on mobile

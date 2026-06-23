@@ -109,6 +109,12 @@ body.hide-results .tr { display: none; }
   cursor: pointer;
 }
 
+/* desktop: centre the chat column with side padding */
+@media (min-width: 641px) {
+  #chat { padding-inline: max(16px, calc((100% - 760px) / 2)); }
+  #chatinput { padding-inline: max(8px, calc((100% - 760px) / 2)); }
+}
+
 /* floating menu button + backdrop — mobile only (hidden on desktop) */
 #menu-toggle { display: none; }
 #backdrop { display: none; }
