@@ -115,6 +115,19 @@ export async function sendRaw(target: string, data: string): Promise<void> {
   }
 }
 
+/**
+ * Send a (possibly multi-line) message via bracketed paste, so newlines are
+ * inserted literally instead of each acting as Enter. Caller sends Enter after.
+ */
+export async function sendText(target: string, data: string): Promise<void> {
+  try {
+    await exec('tmux', ['set-buffer', '--', data]);
+    await exec('tmux', ['paste-buffer', '-t', target, '-p', '-d']);
+  } catch {
+    // non-fatal
+  }
+}
+
 /** Send a proper Enter keypress (submits in most TUIs). */
 export async function sendEnter(target: string): Promise<void> {
   try {

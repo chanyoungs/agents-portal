@@ -189,7 +189,7 @@ const chapterListEl = chaptersSection.querySelector('#chapter-list')!;
 function addChapter(text: string, target: HTMLElement, ts?: string): void {
   const li = document.createElement('li');
   li.className = 'chapter-item';
-  li.innerHTML = `<span class="ch-text"></span>${ts ? `<span class="ch-ts">${kstTime(ts)}</span>` : ''}`;
+  li.innerHTML = `<span class="ch-text"></span>${ts ? `<span class="ch-ts">${kstStamp(ts)}</span>` : ''}`;
   li.querySelector('.ch-text')!.textContent = text.replace(/\s+/g, ' ').slice(0, 60);
   if (ts) li.title = kstFull(ts);
   li.addEventListener('click', () => {
@@ -341,11 +341,12 @@ function addPending(text: string): void {
 const eventUserText = (e: ChatEvent): string =>
   e.blocks.filter((b) => b.kind === 'text').map((b) => b.text ?? '').join('').trim();
 
+const norm = (s: string): string => s.replace(/\s+/g, ' ').trim();
 function resolvePending(e: ChatEvent): void {
   if (e.role !== 'user' || pending.length === 0) return;
-  const t = eventUserText(e);
+  const t = norm(eventUserText(e));
   if (!t) return;
-  const i = pending.findIndex((p) => p.text === t);
+  const i = pending.findIndex((p) => norm(p.text) === t);
   if (i >= 0) { pending[i].el.remove(); pending.splice(i, 1); }
 }
 
@@ -360,10 +361,10 @@ const summarize = (tool: string, input: any): string => {
 const clip = (s: string, n = 4000): string => (s.length > n ? s.slice(0, n) + `\n… (${s.length - n} more chars)` : s);
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// timestamps in Korea Standard Time
-const kstTime = (ts?: string): string => {
+// date + time stamp in Korea Standard Time, e.g. "23 Jun, 14:32"
+const kstStamp = (ts?: string): string => {
   if (!ts) return '';
-  try { return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }); }
+  try { return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Seoul', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); }
   catch { return ''; }
 };
 const kstFull = (ts?: string): string => {
@@ -378,16 +379,13 @@ function renderEvent(e: ChatEvent): HTMLElement {
   // A "user" event that is only tool_result blocks is tool output, not a person.
   const isToolOutput = e.role === 'user' && e.blocks.length > 0 && e.blocks.every((b) => b.kind === 'tool_result');
   const showUser = e.role === 'user' && !isToolOutput;
-  const hasText = e.blocks.some((b) => b.kind === 'text' && b.text);
-  // Header (label + KST time) for genuine user messages and agent text replies.
-  if (showUser || (e.role === 'assistant' && hasText)) {
+  // Only user messages get a header + datetime stamp; agent replies are bare.
+  if (showUser) {
     const who = document.createElement('div');
     who.className = 'who';
-    const tsHtml = e.ts ? `<span class="ts" title="${esc(kstFull(e.ts))}">${kstTime(e.ts)}</span>` : '';
-    who.innerHTML = (showUser ? 'You ' : '') + tsHtml;
+    const tsHtml = e.ts ? `<span class="ts" title="${esc(kstFull(e.ts))}">${kstStamp(e.ts)}</span>` : '';
+    who.innerHTML = 'You ' + tsHtml;
     wrap.appendChild(who);
-  }
-  if (showUser) {
     const t = eventUserText(e);
     if (t) addChapter(t, wrap, e.ts); // sidebar "Messages" jump list
   }

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Config } from '../config.js';
-import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw, sendEnter, findAgentPane, paneVisible } from './tmux.js';
+import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw, sendText, sendEnter, findAgentPane, paneVisible } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
 import { findClaudeTranscript, TranscriptTailer } from './transcript.js';
 import { listCommands } from './commands.js';
@@ -226,7 +226,7 @@ export function startAgent(cfg: Config): { close: () => void } {
         if (msg.type === 'input') {
           const data = msg.data;
           queue = queue.then(async () => {
-            await sendRaw(pane, data);
+            await sendText(pane, data); // bracketed paste (multi-line safe)
             await sendEnter(pane);
             await new Promise((r) => setTimeout(r, 150));
           });

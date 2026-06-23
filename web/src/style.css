@@ -65,7 +65,9 @@ body.hide-results .tr { display: none; }
 .msg .who .ts { color: #6e7681; font-size: 10px; margin-left: 6px; }
 .msg.pending { opacity: .55; }
 .msg.pending .queued { color: #d29922; border: 1px solid #d29922; border-radius: 4px; font-size: 9px; padding: 0 4px; margin-left: 6px; letter-spacing: .02em; }
+.msg.user { padding-left: 24px; } /* indent left; right stays flush with agent messages */
 .msg.user .bubble { background: #1f6feb26; border: 1px solid #1f6feb66; border-radius: 12px; padding: 9px 13px; }
+.msg.pending .bubble { white-space: pre-wrap; } /* preserve typed line breaks while queued */
 .msg .bubble :first-child { margin-top: 0; }
 .msg .bubble :last-child { margin-bottom: 0; }
 .msg pre { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 10px; overflow-x: auto; max-width: 100%; font-size: 13px; }
