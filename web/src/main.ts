@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 
 interface Host { name: string; url: string; token?: string }
 interface SessionInfo { name: string; windows: number; cwd: string; attached: boolean; created: number }
-interface ChatBlock { kind: 'text' | 'thinking' | 'tool_use' | 'tool_result'; text?: string; tool?: string; input?: any; result?: string; isError?: boolean }
+interface ChatBlock { kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image'; text?: string; tool?: string; input?: any; result?: string; isError?: boolean; image?: string }
 interface ChatEvent { role: 'user' | 'assistant'; blocks: ChatBlock[]; ts?: string; uuid?: string }
 
 const STORE_KEY = 'agents-portal.hosts';
@@ -502,6 +502,12 @@ function renderEvent(e: ChatEvent): HTMLElement {
       det.className = 'tool';
       det.innerHTML = `<summary><span class="tname">💭 thinking</span></summary><div class="think"><pre>${esc(clip(b.text))}</pre></div>`;
       wrap.appendChild(det);
+    } else if (b.kind === 'image' && b.image) {
+      const img = document.createElement('img');
+      img.className = 'chat-img';
+      img.loading = 'lazy';
+      img.src = b.image;
+      wrap.appendChild(img);
     } else if (b.kind === 'tool_use' && b.tool === 'AskUserQuestion') {
       wrap.appendChild(renderAsk(b.input));
     } else if (b.kind === 'tool_use') {
@@ -546,6 +552,8 @@ function renderAsk(input: any): HTMLElement {
     qd.appendChild(opts);
     box.appendChild(qd);
   });
+  const row = document.createElement('div');
+  row.className = 'ask-actions';
   const send = document.createElement('button');
   send.className = 'ask-send';
   send.textContent = 'Send answer';
@@ -556,7 +564,14 @@ function renderAsk(input: any): HTMLElement {
     for (const b of box.querySelectorAll('button')) (b as HTMLButtonElement).disabled = true;
     send.textContent = 'Sent';
   });
-  box.appendChild(send);
+  // Fallback: interactive prompts are most reliable in the live tmux view.
+  const tmux = document.createElement('button');
+  tmux.className = 'ask-tmux';
+  tmux.textContent = '↗ answer in tmux';
+  tmux.addEventListener('click', () => showMode('tmux'));
+  row.appendChild(send);
+  row.appendChild(tmux);
+  box.appendChild(row);
   return box;
 }
 

@@ -6,12 +6,20 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export interface ChatBlock {
-  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result';
+  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image';
   text?: string;
   tool?: string;
   input?: unknown;
   result?: string;
   isError?: boolean;
+  image?: string; // data URI or URL (e.g. from a Read of an image file)
+}
+
+function imageUri(source: any): string | null {
+  if (!source) return null;
+  if (source.type === 'base64' && source.data) return `data:${source.media_type || 'image/png'};base64,${source.data}`;
+  if (source.type === 'url' && source.url) return source.url;
+  return null;
 }
 export interface ChatEvent {
   role: 'user' | 'assistant';
@@ -140,15 +148,22 @@ export function parseClaudeLine(line: string): ChatEvent | null {
     for (const b of content) {
       if (b.type === 'text') blocks.push({ kind: 'text', text: b.text });
       else if (b.type === 'thinking') blocks.push({ kind: 'thinking', text: b.thinking });
+      else if (b.type === 'image') { const u = imageUri(b.source); if (u) blocks.push({ kind: 'image', image: u }); }
       else if (b.type === 'tool_use') blocks.push({ kind: 'tool_use', tool: b.name, input: b.input });
       else if (b.type === 'tool_result') {
         const c = b.content;
-        const text = typeof c === 'string'
-          ? c
-          : Array.isArray(c)
-            ? c.map((x: any) => (typeof x === 'string' ? x : x?.text ?? '')).join('')
-            : '';
+        let text = '';
+        const imgs: string[] = [];
+        if (typeof c === 'string') text = c;
+        else if (Array.isArray(c)) {
+          for (const x of c) {
+            if (typeof x === 'string') text += x;
+            else if (x?.type === 'text') text += x.text ?? '';
+            else if (x?.type === 'image') { const u = imageUri(x.source); if (u) imgs.push(u); }
+          }
+        }
         blocks.push({ kind: 'tool_result', result: text, isError: !!b.is_error });
+        for (const u of imgs) blocks.push({ kind: 'image', image: u }); // images from Read etc.
       }
     }
   }
