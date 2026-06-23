@@ -373,7 +373,7 @@ function closeChat(): void { chatWs?.close(); chatWs = null; }
 function connectChat(): void {
   if (!current) return;
   closeChat();
-  chatEl.innerHTML = '';
+  chatEl.innerHTML = '<div class="loading"><span class="spin">✻</span> loading…</div>';
   pending = [];
   chapterListEl.innerHTML = '';
   lastChapterDate = '';
@@ -398,6 +398,7 @@ function connectChat(): void {
       return;
     }
     if (msg.type !== 'chat') return;
+    if (firstBatch) chatEl.innerHTML = ''; // clear the loading spinner
     const nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
     const frag = document.createDocumentFragment();
     for (const e of msg.events as ChatEvent[]) {

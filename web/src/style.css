@@ -63,6 +63,8 @@ body.hide-results .tr { display: none; }
   line-height: 1.5;
 }
 .empty { color: #7d8590; padding: 24px 4px; text-align: center; }
+.loading { color: #7d8590; padding: 32px 4px; text-align: center; font-size: 14px; }
+.loading .spin { display: inline-block; animation: spin 1.2s linear infinite; }
 .msg { margin: 0 0 16px; max-width: min(760px, 100%); overflow-wrap: anywhere; }
 .msg .bubble { overflow-wrap: anywhere; word-break: break-word; }
 .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #7d8590; margin-bottom: 4px; }
