@@ -137,20 +137,17 @@ body {
     align-items: center;
     justify-content: center;
     position: fixed;
-    top: 8px; left: 8px;
+    top: 8px; right: 8px;
     z-index: 80; /* above the drawer so it always toggles */
     width: 40px; height: 40px;
     border-radius: 8px;
-    background: rgba(31, 111, 235, .5);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    color: #fff;
-    border: 0;
+    background: transparent;
+    color: #e6edf3;
+    border: 1px solid rgba(230, 237, 243, .35);
     font-size: 18px;
     line-height: 1;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  body.menu-open #menu-toggle { background: rgba(48, 54, 61, .6); }
+  body.menu-open #menu-toggle { border-color: rgba(230, 237, 243, .65); }
 }
