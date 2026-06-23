@@ -12,10 +12,8 @@ const $ = (id: string) => document.getElementById(id)!;
 const hostsEl = $('hosts');
 const placeholder = $('placeholder');
 const chatEl = $('chat');
-const topbar = $('topbar') as HTMLElement;
 const chatForm = $('chatinput') as HTMLFormElement;
 const chatbox = $('chatbox') as HTMLTextAreaElement;
-const sessionLabel = $('session-label');
 const menuToggle = $('menu-toggle');
 const backdrop = $('backdrop');
 
@@ -90,8 +88,6 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   activeEl = el;
   current = { host, session };
   placeholder.style.display = 'none';
-  topbar.hidden = false;
-  sessionLabel.textContent = `${host.name} / ${session.name}`;
   chatEl.hidden = false;
   chatForm.hidden = false;
   connectChat();
