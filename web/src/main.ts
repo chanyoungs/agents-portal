@@ -228,8 +228,8 @@ main.appendChild(termEl);
 const modeToggle = document.createElement('button');
 modeToggle.id = 'mode-toggle';
 modeToggle.hidden = true;
-main.appendChild(modeToggle);
-modeToggle.addEventListener('click', () => showMode(mode === 'chat' ? 'tmux' : 'chat'));
+sidebar.prepend(modeToggle); // lives at the top of the menu/drawer
+modeToggle.addEventListener('click', () => { showMode(mode === 'chat' ? 'tmux' : 'chat'); if (isMobile()) closeMenu(); });
 
 const b64ToBytes = (s: string): Uint8Array => {
   const bin = atob(s);
@@ -274,7 +274,7 @@ function connectTerminal(): void {
 function showMode(m: 'chat' | 'tmux'): void {
   mode = m;
   localStorage.setItem('ap.mode', m);
-  modeToggle.textContent = m === 'chat' ? '⌗ tmux' : '💬 chat';
+  modeToggle.textContent = m === 'chat' ? 'Switch to tmux view' : 'Switch to chat view';
   if (m === 'chat') {
     closeTerminal();
     termEl.hidden = true;
@@ -434,9 +434,13 @@ const norm = (s: string): string => s.replace(/\s+/g, ' ').trim();
 function resolvePending(e: ChatEvent): void {
   if (e.role !== 'user' || pending.length === 0) return;
   const t = norm(eventUserText(e));
-  if (!t) return;
-  const i = pending.findIndex((p) => norm(p.text) === t);
-  if (i >= 0) { pending[i].el.remove(); pending.splice(i, 1); }
+  if (!t) return; // tool results etc. have no user text — never clear a pending
+  // Prefer an exact match; otherwise clear the oldest (messages arrive in order,
+  // one per turn), so a real user message always removes its queued bubble.
+  let i = pending.findIndex((p) => norm(p.text) === t);
+  if (i < 0) i = 0;
+  pending[i].el.remove();
+  pending.splice(i, 1);
 }
 
 const summarize = (tool: string, input: any): string => {
