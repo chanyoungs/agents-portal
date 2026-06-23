@@ -8,7 +8,7 @@
 // the pane is sized to the (active) client via `resize-window`.
 import { createServer, type IncomingMessage } from 'node:http';
 import { existsSync, mkdirSync, writeFileSync, statSync, openSync, readSync, closeSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, isAbsolute, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -95,6 +95,33 @@ export function startAgent(cfg: Config): { close: () => void } {
     const file = join(dir, `${Date.now()}-${safe}`);
     writeFileSync(file, req.body as Buffer);
     res.json({ path: file });
+  });
+
+  // Serve a file from a session's cwd so the chat can render media the agent
+  // emitted (e.g. a SendUserFile tool call with files: ["montage/montage.mp4"]).
+  // Paths are resolved against the session cwd and confined to it (no traversal).
+  // express sendFile handles Content-Type + HTTP Range, so <video> can seek.
+  app.get('/api/file', async (req, res) => {
+    if (!authed(req)) return res.sendStatus(401);
+    const session = String(req.query.session ?? '');
+    const rel = String(req.query.path ?? '');
+    if (!session || !rel) return res.sendStatus(400);
+    const cwd = await sessionCwd(session);
+    if (!cwd) return res.status(400).json({ error: 'unknown session cwd' });
+    const root = resolve(cwd);
+    // Resolve relative paths against the event's cwd (where the agent created
+    // the file), which may be a subdir of the session cwd; still confine the
+    // final path within the session root so nothing outside it can be served.
+    const baseQ = String(req.query.base ?? '');
+    const base = baseQ && resolve(baseQ).startsWith(root) ? resolve(baseQ) : root;
+    const abs = isAbsolute(rel) ? resolve(rel) : resolve(base, rel);
+    if (abs !== root && !abs.startsWith(root + sep)) return res.sendStatus(403); // outside cwd
+    try {
+      if (!statSync(abs).isFile()) return res.sendStatus(404);
+    } catch {
+      return res.sendStatus(404);
+    }
+    res.sendFile(abs);
   });
 
   const webRoot = findWebRoot();

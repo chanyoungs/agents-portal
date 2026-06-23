@@ -7,7 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 interface Host { name: string; url: string; token?: string }
 interface SessionInfo { name: string; windows: number; cwd: string; attached: boolean; created: number }
 interface ChatBlock { kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image'; text?: string; tool?: string; input?: any; result?: string; isError?: boolean; image?: string }
-interface ChatEvent { role: 'user' | 'assistant'; blocks: ChatBlock[]; ts?: string; uuid?: string }
+interface ChatEvent { role: 'user' | 'assistant'; blocks: ChatBlock[]; ts?: string; uuid?: string; cwd?: string }
 
 const STORE_KEY = 'agents-portal.hosts';
 const loadManual = (): Host[] => JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]');
@@ -370,6 +370,60 @@ function wsUrl(host: Host, path: string, params: Record<string, string>): string
   return `${host.url.replace(/^http/, 'ws')}${path}?${q}`;
 }
 
+// URL to fetch a file from the active session's cwd (served by /api/file).
+function fileUrl(path: string, base?: string): string {
+  if (!current) return '';
+  const q = new URLSearchParams({ session: current.session.name, path });
+  if (base) q.set('base', base); // resolve relative paths against the event's cwd
+  if (current.host.token) q.set('token', current.host.token);
+  return `${current.host.url}/api/file?${q}`;
+}
+
+const VIDEO_EXT = new Set(['mp4', 'mov', 'webm', 'm4v', 'ogv']);
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp']);
+
+// Render a SendUserFile tool call as inline media (video/image) instead of a
+// JSON card: the file lives in the session's cwd and is streamed by /api/file.
+function renderSendUserFile(b: ChatBlock, base?: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'files';
+  const files: string[] = Array.isArray(b.input?.files) ? b.input.files : [];
+  for (const f of files) {
+    const url = fileUrl(f, base);
+    const ext = (f.split('.').pop() ?? '').toLowerCase();
+    if (VIDEO_EXT.has(ext)) {
+      const v = document.createElement('video');
+      v.className = 'chat-img';
+      v.controls = true;
+      v.preload = 'metadata';
+      v.playsInline = true;
+      v.src = url;
+      wrap.appendChild(v);
+    } else if (IMAGE_EXT.has(ext)) {
+      const img = document.createElement('img');
+      img.className = 'chat-img';
+      img.loading = 'lazy';
+      img.src = url;
+      wrap.appendChild(img);
+    } else {
+      const a = document.createElement('a');
+      a.className = 'file-link';
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = '📎 ' + (f.split('/').pop() ?? f);
+      wrap.appendChild(a);
+    }
+  }
+  if (typeof b.input?.caption === 'string' && b.input.caption.trim()) {
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = b.input.caption;
+    wrap.appendChild(cap);
+  }
+  return wrap;
+}
+
 function closeChat(): void { chatWs?.close(); chatWs = null; }
 
 function connectChat(): void {
@@ -510,6 +564,8 @@ function renderEvent(e: ChatEvent): HTMLElement {
       wrap.appendChild(img);
     } else if (b.kind === 'tool_use' && b.tool === 'AskUserQuestion') {
       wrap.appendChild(renderAsk(b.input));
+    } else if (b.kind === 'tool_use' && b.tool === 'SendUserFile') {
+      wrap.appendChild(renderSendUserFile(b, e.cwd));
     } else if (b.kind === 'tool_use') {
       wrap.appendChild(renderToolUse(b));
     } else if (b.kind === 'tool_result' && b.result) {

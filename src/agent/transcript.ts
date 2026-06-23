@@ -26,6 +26,7 @@ export interface ChatEvent {
   blocks: ChatBlock[];
   ts?: string;
   uuid?: string;
+  cwd?: string; // event's working dir — resolves relative file paths (SendUserFile)
 }
 
 const CLAUDE_PROJECTS = join(homedir(), '.claude', 'projects');
@@ -168,7 +169,7 @@ export function parseClaudeLine(line: string): ChatEvent | null {
     }
   }
   if (blocks.length === 0) return null;
-  return { role: o.type, blocks, ts: o.timestamp, uuid: o.uuid };
+  return { role: o.type, blocks, ts: o.timestamp, uuid: o.uuid, cwd: o.cwd };
 }
 
 /**

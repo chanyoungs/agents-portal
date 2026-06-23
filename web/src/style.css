@@ -94,6 +94,10 @@ body.hide-results .tr { display: none; }
 .ask-tmux:hover { border-color: #1f6feb; color: #e6edf3; }
 .ask button:disabled { opacity: .55; cursor: default; }
 .chat-img { display: block; max-width: 100%; max-height: 420px; border: 1px solid #21262d; border-radius: 8px; margin: 6px 0; }
+.files { margin: 6px 0; }
+.files .cap { color: #7d8590; font-size: 13px; margin-top: 4px; }
+.file-link { display: inline-block; color: #58a6ff; background: #161b22; border: 1px solid #30363d; border-radius: 7px; padding: 6px 10px; margin: 4px 0; text-decoration: none; font-size: 13px; }
+.file-link:hover { border-color: #1f6feb; }
 .tool { border: 1px solid #30363d; border-radius: 8px; margin: 6px 0; overflow: hidden; }
 .tool > summary { cursor: pointer; padding: 6px 10px; background: #161b22; font-size: 13px; list-style: none; white-space: normal; overflow-wrap: anywhere; }
 .tool > summary .tname { color: #58a6ff; font-family: ui-monospace, monospace; }
