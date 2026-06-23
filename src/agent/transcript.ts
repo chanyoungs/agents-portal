@@ -1,7 +1,7 @@
 // Read & tail a coding agent's own session transcript (its source-of-truth log)
 // and normalize it into chat events, so the web UI can render a clean
 // conversation without scraping the terminal. Claude Code first.
-import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -45,9 +45,66 @@ function newestJsonl(dir: string): string | null {
   return best;
 }
 
-/** Locate the active Claude transcript for a working directory. */
+/** Locate the active Claude transcript for a working directory (newest). */
 export function findClaudeTranscript(cwd: string): string | null {
   return newestJsonl(join(CLAUDE_PROJECTS, claudeSlug(cwd)));
+}
+
+/** Event timestamps (epoch seconds) in a transcript, via a fast line scan. */
+function eventTimes(file: string): number[] {
+  const out: number[] = [];
+  let data = '';
+  try { data = readFileSync(file, 'utf8'); } catch { return out; }
+  for (const line of data.split('\n')) {
+    const m = line.match(/"timestamp":"([^"]+)"/);
+    if (m) { const t = Date.parse(m[1]); if (!Number.isNaN(t)) out.push(t / 1000); }
+  }
+  return out;
+}
+
+/**
+ * Assign each Claude session (in one cwd) to a DISTINCT transcript by matching
+ * its process start time to the nearest event, greedily, so sessions sharing a
+ * cwd don't all collapse onto the newest transcript. Cached briefly per cwd.
+ */
+let cache: { cwd: string; at: number; map: Map<string, string> } | null = null;
+export function resolveTranscript(cwd: string, session: string, sessions: { session: string; start: number }[], now: number): string | null {
+  if (!cache || cache.cwd !== cwd || now - cache.at > 15000) {
+    cache = { cwd, at: now, map: assign(cwd, sessions) };
+  }
+  return cache.map.get(session) ?? findClaudeTranscript(cwd);
+}
+
+function assign(cwd: string, sessions: { session: string; start: number }[]): Map<string, string> {
+  const dir = join(CLAUDE_PROJECTS, claudeSlug(cwd));
+  const map = new Map<string, string>();
+  if (!existsSync(dir) || sessions.length === 0) return map;
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .map((f) => join(dir, f))
+    .map((f) => ({ f, m: statSync(f).mtimeMs }))
+    .sort((a, b) => b.m - a.m)
+    .slice(0, Math.max(sessions.length + 3, 8))
+    .map((x) => x.f);
+  const times = new Map(files.map((f) => [f, eventTimes(f)] as const));
+  const pairs: { d: number; s: string; f: string }[] = [];
+  for (const { session, start } of sessions) {
+    for (const f of files) {
+      const ts = times.get(f)!;
+      if (!ts.length) continue;
+      let d = Infinity;
+      for (const t of ts) d = Math.min(d, Math.abs(t - start));
+      pairs.push({ d, s: session, f });
+    }
+  }
+  pairs.sort((a, b) => a.d - b.d);
+  const usedF = new Set<string>();
+  for (const { s, f } of pairs) {
+    if (map.has(s) || usedF.has(f)) continue;
+    map.set(s, f);
+    usedF.add(f);
+  }
+  return map;
 }
 
 /** Normalize one Claude JSONL line into a chat event (or null to skip). */

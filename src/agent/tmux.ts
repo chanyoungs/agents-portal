@@ -1,9 +1,82 @@
 // Thin wrappers over the tmux CLI.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readdirSync, readFileSync } from 'node:fs';
 import type { SessionInfo } from '../shared/protocol.js';
 
 const exec = promisify(execFile);
+
+export interface ClaudeSession {
+  session: string;
+  cwd: string;
+  /** Unix seconds the Claude process started (for transcript matching). */
+  start: number;
+}
+
+function bootTime(): number {
+  try {
+    for (const l of readFileSync('/proc/stat', 'utf8').split('\n')) if (l.startsWith('btime')) return Number(l.split(/\s+/)[1]);
+  } catch { /* not linux */ }
+  return 0;
+}
+
+/** pid → { ppid, comm, start(jiffies) } from /proc. */
+function procTable(): Map<number, { ppid: number; comm: string; start: number }> {
+  const m = new Map<number, { ppid: number; comm: string; start: number }>();
+  let names: string[] = [];
+  try { names = readdirSync('/proc'); } catch { return m; }
+  for (const n of names) {
+    if (!/^\d+$/.test(n)) continue;
+    try {
+      const s = readFileSync(`/proc/${n}/stat`, 'utf8');
+      const rp = s.lastIndexOf(')');
+      const comm = s.slice(s.indexOf('(') + 1, rp);
+      const rest = s.slice(rp + 2).split(' ');
+      m.set(Number(n), { ppid: Number(rest[1]), comm, start: Number(rest[19]) });
+    } catch { /* race: pid gone */ }
+  }
+  return m;
+}
+
+/**
+ * All tmux sessions running Claude, with the Claude process's start time — used
+ * to map each session to its own transcript (sessions can share a cwd).
+ */
+export async function claudeSessions(): Promise<ClaudeSession[]> {
+  let stdout = '';
+  try {
+    ({ stdout } = await exec('tmux', ['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}']));
+  } catch { return []; }
+  const table = procTable();
+  const children = new Map<number, number[]>();
+  for (const [pid, info] of table) {
+    const a = children.get(info.ppid) ?? [];
+    a.push(pid);
+    children.set(info.ppid, a);
+  }
+  const findClaude = (root: number): number | null => {
+    const stack = [root];
+    while (stack.length) {
+      const p = stack.pop()!;
+      if (table.get(p)?.comm === 'claude') return p;
+      for (const c of children.get(p) ?? []) stack.push(c);
+    }
+    return null;
+  };
+  const btime = bootTime();
+  const out = new Map<string, ClaudeSession>();
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) continue;
+    const [session, panePid, cmd, cwd] = line.split('\t');
+    if (cmd !== 'claude') continue;
+    const cp = findClaude(Number(panePid)) ?? Number(panePid);
+    const info = table.get(cp);
+    if (!info) continue;
+    const start = btime + info.start / 100; // USER_HZ = 100 on Linux
+    if (!out.has(session)) out.set(session, { session, cwd, start });
+  }
+  return [...out.values()];
+}
 
 /** Fields we ask tmux to print, tab-separated, one line per session. */
 const FORMAT = [
@@ -76,7 +149,11 @@ export async function capturePane(session: string, lines = 3000): Promise<string
  */
 export async function newGroupedSession(name: string, target: string): Promise<void> {
   await exec('tmux', ['new-session', '-d', '-s', name, '-t', target]);
-  try { await exec('tmux', ['set-option', '-t', name, 'mouse', 'on']); } catch { /* non-fatal */ }
+  // mouse on; size shared windows to the most recently active client (so the
+  // window fits whichever device is currently being used).
+  for (const opt of [['mouse', 'on'], ['window-size', 'latest']]) {
+    try { await exec('tmux', ['set-option', '-t', name, opt[0], opt[1]]); } catch { /* non-fatal */ }
+  }
 }
 
 export async function killSession(name: string): Promise<void> {
