@@ -15,7 +15,7 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Config } from '../config.js';
 import * as pty from 'node-pty';
-import { listSessions, sessionCwd, sendText, sendEnter, findAgentPane, paneVisible, newGroupedSession, killSession } from './tmux.js';
+import { listSessions, sessionCwd, sendText, sendEnter, findAgentPane, paneVisible, newGroupedSession, killSession, killStaleGroups } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
 import { findClaudeTranscript, TranscriptTailer } from './transcript.js';
 import { listCommands } from './commands.js';
@@ -264,6 +264,8 @@ export function startAgent(cfg: Config): { close: () => void } {
     });
     ws.on('close', () => { term.kill(); void killSession(group); });
   }
+
+  void killStaleGroups(); // sweep leftover grouped sessions from a previous run
 
   server.listen(cfg.port, '127.0.0.1', () => {
     console.log(`agents-portal agent listening on http://127.0.0.1:${cfg.port}`);

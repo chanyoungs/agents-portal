@@ -70,17 +70,27 @@ export async function capturePane(session: string, lines = 3000): Promise<string
 /**
  * Create a grouped session sharing `target`'s windows, so a web client gets its
  * own view (independent current window + size) without disturbing other clients.
- * Mouse on (clicks/scroll work); auto-destroyed when the web client detaches.
+ * Mouse on (clicks/scroll work). Cleaned up explicitly on detach (we can't use
+ * destroy-unattached here — it would kill the freshly-created detached session
+ * before we attach). Orphans are swept on agent startup.
  */
 export async function newGroupedSession(name: string, target: string): Promise<void> {
   await exec('tmux', ['new-session', '-d', '-s', name, '-t', target]);
-  for (const opt of [['mouse', 'on'], ['destroy-unattached', 'on']]) {
-    try { await exec('tmux', ['set-option', '-t', name, opt[0], opt[1]]); } catch { /* non-fatal */ }
-  }
+  try { await exec('tmux', ['set-option', '-t', name, 'mouse', 'on']); } catch { /* non-fatal */ }
 }
 
 export async function killSession(name: string): Promise<void> {
   try { await exec('tmux', ['kill-session', '-t', name]); } catch { /* may already be gone */ }
+}
+
+/** Kill leftover web-client grouped sessions (e.g. after an agent crash). */
+export async function killStaleGroups(): Promise<void> {
+  try {
+    const { stdout } = await exec('tmux', ['list-sessions', '-F', '#{session_name}']);
+    for (const name of stdout.split('\n')) {
+      if (name.startsWith('_ap_')) await killSession(name);
+    }
+  } catch { /* no server / no sessions */ }
 }
 
 /** Visible (no scrollback) text of a pane — used to detect the busy spinner. */
