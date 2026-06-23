@@ -80,6 +80,16 @@ body.hide-results .tr { display: none; }
 .msg code { font-family: ui-monospace, "DejaVu Sans Mono", monospace; }
 .msg :not(pre) > code { background: #161b22; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
 .think { color: #6e7681; font-style: italic; }
+/* interactive AskUserQuestion */
+.ask { border: 1px solid #1f6feb66; border-radius: 10px; padding: 10px 12px; margin: 6px 0; background: #1f6feb14; }
+.ask-q { margin-bottom: 10px; }
+.ask-qtext { font-size: 14px; margin-bottom: 6px; }
+.ask-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-opt { background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 7px; padding: 7px 11px; font-size: 13px; cursor: pointer; }
+.ask-opt:hover { border-color: #1f6feb; }
+.ask-opt.chosen { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.ask-send { margin-top: 4px; background: #1f6feb; color: #fff; border: 0; border-radius: 7px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+.ask button:disabled { opacity: .55; cursor: default; }
 .tool { border: 1px solid #30363d; border-radius: 8px; margin: 6px 0; overflow: hidden; }
 .tool > summary { cursor: pointer; padding: 6px 10px; background: #161b22; font-size: 13px; list-style: none; white-space: normal; overflow-wrap: anywhere; }
 .tool > summary .tname { color: #58a6ff; font-family: ui-monospace, monospace; }

@@ -63,12 +63,14 @@ function setupFilters(): void {
 }
 setupFilters();
 
-chatForm.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const text = chatbox.value;
+function sendMessage(text: string): void {
   if (!text.trim() || chatWs?.readyState !== WebSocket.OPEN) return;
   chatWs.send(JSON.stringify({ type: 'input', data: text }));
   addPending(text.trim()); // show immediately as "queued" until it lands in the transcript
+}
+chatForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  sendMessage(chatbox.value);
   chatbox.value = '';
   chatbox.style.height = 'auto';
 });
@@ -410,6 +412,9 @@ function connectChat(): void {
     // keep queued placeholders at the bottom, after newly-rendered events
     for (const p of pending) frag.appendChild(p.el);
     chatEl.appendChild(frag);
+    // only the most recent question stays interactive
+    const asks = chatEl.querySelectorAll('.ask');
+    asks.forEach((a, i) => { if (i < asks.length - 1) for (const b of a.querySelectorAll('button')) (b as HTMLButtonElement).disabled = true; });
     if (nearBottom) {
       if (firstBatch) chatEl.scrollTop = chatEl.scrollHeight; // jump on initial load
       else chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' }); // glide up to new messages
@@ -497,6 +502,8 @@ function renderEvent(e: ChatEvent): HTMLElement {
       det.className = 'tool';
       det.innerHTML = `<summary><span class="tname">💭 thinking</span></summary><div class="think"><pre>${esc(clip(b.text))}</pre></div>`;
       wrap.appendChild(det);
+    } else if (b.kind === 'tool_use' && b.tool === 'AskUserQuestion') {
+      wrap.appendChild(renderAsk(b.input));
     } else if (b.kind === 'tool_use') {
       wrap.appendChild(renderToolUse(b));
     } else if (b.kind === 'tool_result' && b.result) {
@@ -507,6 +514,50 @@ function renderEvent(e: ChatEvent): HTMLElement {
     }
   }
   return wrap;
+}
+
+// Render an AskUserQuestion as selectable options; "Send" submits the choices
+// as a message (Claude records them as the answer). Falls back to typing.
+function renderAsk(input: any): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'ask';
+  const questions: any[] = Array.isArray(input?.questions) ? input.questions : [];
+  const chosen = new Map<number, string>();
+  questions.forEach((q, qi) => {
+    const qd = document.createElement('div');
+    qd.className = 'ask-q';
+    const qt = document.createElement('div');
+    qt.className = 'ask-qtext';
+    qt.textContent = q.question ?? '';
+    qd.appendChild(qt);
+    const opts = document.createElement('div');
+    opts.className = 'ask-opts';
+    for (const o of q.options ?? []) {
+      const btn = document.createElement('button');
+      btn.className = 'ask-opt';
+      btn.textContent = o.label ?? '';
+      btn.addEventListener('click', () => {
+        chosen.set(qi, btn.textContent ?? '');
+        for (const x of opts.querySelectorAll('.ask-opt')) x.classList.remove('chosen');
+        btn.classList.add('chosen');
+      });
+      opts.appendChild(btn);
+    }
+    qd.appendChild(opts);
+    box.appendChild(qd);
+  });
+  const send = document.createElement('button');
+  send.className = 'ask-send';
+  send.textContent = 'Send answer';
+  send.addEventListener('click', () => {
+    const ans = questions.map((_, qi) => chosen.get(qi)).filter(Boolean) as string[];
+    if (!ans.length) return;
+    sendMessage(ans.join('\n'));
+    for (const b of box.querySelectorAll('button')) (b as HTMLButtonElement).disabled = true;
+    send.textContent = 'Sent';
+  });
+  box.appendChild(send);
+  return box;
 }
 
 function renderToolUse(b: ChatBlock): HTMLElement {
