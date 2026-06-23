@@ -11,12 +11,17 @@ export interface Config {
   token: string;
   /** Display name for this host in the dashboard. */
   hostName: string;
+  /**
+   * If set, only these Tailscale logins may access the agent. Empty = any
+   * authenticated tailnet member (tailnet membership is already the boundary).
+   */
+  allowedLogins: string[];
 }
 
 const CONFIG_DIR = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'agents-portal');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
-const DEFAULTS: Omit<Config, 'token'> = {
+const DEFAULTS: Omit<Config, 'token' | 'allowedLogins'> = {
   port: 7420,
   hostName: hostname(),
 };
@@ -34,6 +39,7 @@ export function loadConfig(): Config {
     port: stored.port ?? DEFAULTS.port,
     hostName: stored.hostName ?? DEFAULTS.hostName,
     token: stored.token ?? randomBytes(24).toString('base64url'),
+    allowedLogins: stored.allowedLogins ?? [],
   };
   // Persist so the generated token is stable across restarts.
   if (!stored.token) saveConfig(cfg);

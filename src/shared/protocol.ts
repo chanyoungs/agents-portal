@@ -31,6 +31,9 @@ export type ClientToAgent =
   | { type: 'resize'; cols: number; rows: number };
 
 // ── Agent → Client (over the terminal WebSocket) ────────────────────────────
+// `output.data` is base64-encoded raw terminal bytes (base64 keeps multi-byte
+// UTF-8 sequences intact across chunk boundaries; the client decodes to bytes
+// and writes them straight into xterm).
 export type AgentToClient =
   | { type: 'output'; data: string }
   | { type: 'closed'; reason: string };

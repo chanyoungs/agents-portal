@@ -3,11 +3,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 
-// A workstation the dashboard connects to directly over the tailnet.
 interface Host {
   name: string;
-  url: string; // e.g. https://workstationA.tailnet.ts.net
-  token: string;
+  url: string; // origin, e.g. https://workstationA.tailnet.ts.net
+  token?: string; // only for manually-added cross-tailnet hosts
 }
 interface SessionInfo {
   name: string;
@@ -18,8 +17,8 @@ interface SessionInfo {
 }
 
 const STORE_KEY = 'agents-portal.hosts';
-const loadHosts = (): Host[] => JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]');
-const saveHosts = (h: Host[]) => localStorage.setItem(STORE_KEY, JSON.stringify(h));
+const loadManual = (): Host[] => JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]');
+const saveManual = (h: Host[]) => localStorage.setItem(STORE_KEY, JSON.stringify(h));
 
 const hostsEl = document.getElementById('hosts')!;
 const placeholder = document.getElementById('placeholder')!;
@@ -35,36 +34,18 @@ document.getElementById('add-host')!.addEventListener('click', addHostPrompt);
 setupToolbar();
 setupTouchScroll();
 
-const WHEEL_UP = '\x1b[<64;1;1M';
-const WHEEL_DOWN = '\x1b[<65;1;1M';
-
-// Finger-drag scrolling: xterm doesn't translate touch into the app's
-// mouse-wheel events, so we do it. tmux mouse mode (on by the agent) turns
-// these wheel escapes into scrollback movement. Drag down = older content.
-function setupTouchScroll(): void {
-  let lastY = 0;
-  let accum = 0;
-  const STEP = 22; // px per wheel notch
-  termEl.addEventListener('touchstart', (e) => { lastY = e.touches[0].clientY; accum = 0; }, { passive: true });
-  termEl.addEventListener('touchmove', (e) => {
-    const y = e.touches[0].clientY;
-    accum += y - lastY;
-    lastY = y;
-    while (Math.abs(accum) >= STEP) {
-      if (accum > 0) { send(WHEEL_UP); accum -= STEP; }
-      else { send(WHEEL_DOWN); accum += STEP; }
-    }
-    e.preventDefault(); // stop the page itself from scrolling
-  }, { passive: false });
-}
-
 function send(data: string): void {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
 }
 
-// On-screen keys for phones (which lack Esc/Ctrl/arrows). Scroll buttons emit
-// mouse-wheel escapes; the agent turns on tmux mouse mode so they scroll
-// tmux's scrollback (xterm's own scrollback is bypassed by tmux's alt-screen).
+const b64ToBytes = (s: string): Uint8Array => {
+  const bin = atob(s);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+};
+
+// Keys phones lack. Scroll keys drive xterm's native scrollback, not the agent.
 const KEYS: Record<string, string> = {
   esc: '\x1b',
   tab: '\t',
@@ -73,36 +54,75 @@ const KEYS: Record<string, string> = {
   down: '\x1b[B',
   left: '\x1b[D',
   right: '\x1b[C',
-  pageup: '\x1b[<64;1;1M'.repeat(3), // wheel-up ×3
-  pagedown: '\x1b[<65;1;1M'.repeat(3), // wheel-down ×3
 };
 
 function setupToolbar(): void {
   for (const btn of toolbar.querySelectorAll('button')) {
+    const key = (btn as HTMLElement).dataset.key ?? '';
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      const seq = KEYS[(btn as HTMLElement).dataset.key ?? ''];
-      if (seq) send(seq);
+      if (key === 'pageup') term?.scrollPages(-1);
+      else if (key === 'pagedown') term?.scrollPages(1);
+      else if (KEYS[key]) send(KEYS[key]);
       term?.focus();
     });
   }
 }
 
+// Finger-drag scrolls xterm's native scrollback (the agent streams raw output,
+// so xterm owns the history — no tmux copy-mode involved).
+function setupTouchScroll(): void {
+  let lastY = 0;
+  let accum = 0;
+  const STEP = 16;
+  termEl.addEventListener('touchstart', (e) => { lastY = e.touches[0].clientY; accum = 0; }, { passive: true });
+  termEl.addEventListener('touchmove', (e) => {
+    const y = e.touches[0].clientY;
+    accum += y - lastY;
+    lastY = y;
+    while (Math.abs(accum) >= STEP) {
+      term?.scrollLines(accum > 0 ? -1 : 1); // drag down → older lines
+      accum += accum > 0 ? -STEP : STEP;
+    }
+    e.preventDefault();
+  }, { passive: false });
+}
+
 function addHostPrompt(): void {
   const url = prompt('Host URL (e.g. https://workstationA.tailnet.ts.net)')?.trim();
   if (!url) return;
-  const token = prompt('Token for this host')?.trim();
-  if (!token) return;
+  const token = prompt('Token (leave blank if on the same tailnet)')?.trim() || undefined;
   const name = prompt('Display name', new URL(url).hostname)?.trim() || url;
-  const hosts = loadHosts();
+  const hosts = loadManual();
   hosts.push({ name, url: url.replace(/\/$/, ''), token });
-  saveHosts(hosts);
+  saveManual(hosts);
   render();
 }
 
+// Auto-discover hosts from the serving agent's tailnet, plus any manual ones.
+async function discoverHosts(): Promise<Host[]> {
+  const hosts: Host[] = [];
+  try {
+    const res = await fetch(`${location.origin}/api/hosts`);
+    if (res.ok) {
+      const peers: { hostName: string; dnsName: string; online: boolean; self: boolean }[] = await res.json();
+      for (const p of peers) {
+        if (!p.online) continue;
+        hosts.push({ name: p.hostName, url: p.self ? location.origin : `https://${p.dnsName}` });
+      }
+    }
+  } catch {
+    // not agent-served (e.g. github.io) — manual hosts only
+  }
+  for (const m of loadManual()) if (!hosts.some((h) => h.url === m.url)) hosts.push(m);
+  return hosts;
+}
+
+const authHeaders = (h: Host): HeadersInit => (h.token ? { Authorization: `Bearer ${h.token}` } : {});
+
 async function render(): Promise<void> {
   hostsEl.innerHTML = '';
-  for (const host of loadHosts()) {
+  for (const host of await discoverHosts()) {
     const header = document.createElement('li');
     header.className = 'host-name';
     header.textContent = host.name;
@@ -110,14 +130,14 @@ async function render(): Promise<void> {
 
     let sessions: SessionInfo[] = [];
     try {
-      const res = await fetch(`${host.url}/api/sessions`, {
-        headers: { Authorization: `Bearer ${host.token}` },
-      });
+      const res = await fetch(`${host.url}/api/sessions`, { headers: authHeaders(host) });
       if (res.ok) sessions = await res.json();
-      else header.textContent = `${host.name} — ${res.status}`;
+      else { header.textContent = `${host.name} — ${res.status}`; continue; }
     } catch {
       header.textContent = `${host.name} — offline`;
+      continue;
     }
+    if (sessions.length === 0) header.textContent = `${host.name} — no sessions`;
 
     for (const s of sessions) {
       const li = document.createElement('li');
@@ -141,6 +161,7 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   term = new Terminal({
     cursorBlink: true,
     fontSize: 13,
+    scrollback: 5000,
     fontFamily: 'ui-monospace, "DejaVu Sans Mono", Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace',
     theme: { background: '#0d1117' },
     allowProposedApi: true,
@@ -149,18 +170,19 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   const unicode11 = new Unicode11Addon();
   term.loadAddon(fit);
   term.loadAddon(unicode11);
-  term.unicode.activeVersion = '11'; // correct wide-glyph widths (powerline, ▶, etc.)
+  term.unicode.activeVersion = '11';
   term.open(termEl);
   fit.fit();
 
   const wsBase = host.url.replace(/^http/, 'ws');
   const { cols, rows } = term;
-  const q = `session=${encodeURIComponent(session.name)}&token=${encodeURIComponent(host.token)}&cols=${cols}&rows=${rows}`;
+  let q = `session=${encodeURIComponent(session.name)}&cols=${cols}&rows=${rows}`;
+  if (host.token) q += `&token=${encodeURIComponent(host.token)}`;
   ws = new WebSocket(`${wsBase}/ws/terminal?${q}`);
 
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === 'output') term!.write(msg.data);
+    if (msg.type === 'output') term!.write(b64ToBytes(msg.data));
     else if (msg.type === 'closed') term!.write(`\r\n[${msg.reason}]\r\n`);
   };
   term.onData((data) => send(data));

@@ -32,7 +32,6 @@ export async function listSessions(): Promise<SessionInfo[]> {
         };
       });
   } catch {
-    // `tmux list-sessions` exits non-zero when no server is running.
     return [];
   }
 }
@@ -46,17 +45,52 @@ export async function sessionExists(name: string): Promise<boolean> {
   }
 }
 
-/** Enable tmux mouse mode so wheel/scroll events drive copy-mode scrollback. */
-export async function setMouse(session: string, on = true): Promise<void> {
+/** Capture scrollback + current screen (with colors) to prime a new viewer. */
+export async function capturePane(session: string, lines = 3000): Promise<string> {
   try {
-    await exec('tmux', ['set-option', '-t', session, 'mouse', on ? 'on' : 'off']);
+    const { stdout } = await exec('tmux', [
+      'capture-pane', '-p', '-e', '-S', `-${lines}`, '-t', session,
+    ]);
+    return stdout.replace(/\n/g, '\r\n'); // xterm needs CR+LF
   } catch {
-    // session may have just closed — non-fatal
+    return '';
   }
 }
 
-/** Send a literal string of keys to a session (used for path injection later). */
-export async function sendKeys(session: string, keys: string, enter = false): Promise<void> {
-  await exec('tmux', ['send-keys', '-t', session, keys]);
-  if (enter) await exec('tmux', ['send-keys', '-t', session, 'Enter']);
+/** Begin piping the pane's raw output to a file (unbuffered). */
+export async function startPipe(session: string, file: string): Promise<void> {
+  await exec('tmux', ['pipe-pane', '-o', '-t', session, `stdbuf -o0 cat >> '${file}'`]);
+}
+
+/** Stop piping the pane's output. */
+export async function stopPipe(session: string): Promise<void> {
+  try {
+    await exec('tmux', ['pipe-pane', '-t', session]);
+  } catch {
+    // session may have closed — non-fatal
+  }
+}
+
+/**
+ * Fix the pane to an explicit size and resize to the (active) client's
+ * dimensions, so the raw output we stream matches the renderer's grid.
+ */
+export async function resizeWindow(session: string, cols: number, rows: number): Promise<void> {
+  try {
+    await exec('tmux', ['set-option', '-t', session, 'window-size', 'manual']);
+    await exec('tmux', ['resize-window', '-t', session, '-x', String(cols), '-y', String(rows)]);
+  } catch {
+    // non-fatal
+  }
+}
+
+/** Write raw input bytes to a session as hex key events (handles any byte). */
+export async function sendRaw(session: string, data: string): Promise<void> {
+  const hex = Buffer.from(data, 'utf8').toString('hex').match(/.{2}/g);
+  if (!hex) return;
+  try {
+    await exec('tmux', ['send-keys', '-t', session, '-H', ...hex]);
+  } catch {
+    // non-fatal
+  }
 }

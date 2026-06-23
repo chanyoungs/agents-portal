@@ -44,17 +44,23 @@ Every device (workstations + your laptop/phone) joins one tailnet via
 `tailscale up` (Google SSO). Each workstation agent is exposed with
 `tailscale serve` (real HTTPS on its `*.ts.net` name). Security boundary:
 - **Tailnet membership** is the primary boundary.
-- A **per-agent token** gates the WS/REST endpoints so a tailnet co-member can't
-  silently attach. Entered once per host in the SPA.
-- **CORS**: the agent allows the GitHub Pages origin (the SPA's origin).
+- **Identity auth, no tokens.** `tailscale serve` injects a verified
+  `Tailscale-User-Login` header on every request; the agent (bound to
+  `127.0.0.1`, reachable only via serve) trusts it. Optionally restrict to
+  specific logins via `allowedLogins`. A config token remains as a dev/local and
+  cross-tailnet fallback.
+- **CORS**: the agent reflects the requesting origin (token/identity is the gate).
 
 ## Components (one npm package, `agents-portal`)
 
-- **agent** — `agents-portal up`. Long-running per-workstation server. Watches
-  `tmux list-sessions`, exposes:
-  - `GET /api/info`, `GET /api/sessions`
-  - `WS /ws/terminal?session=<name>` — bridges the PTY via `tmux attach -t <name>`
-    through node-pty (input/output/resize).
+- **agent** — `agents-portal up`. Long-running per-workstation server. Serves
+  the dashboard and exposes:
+  - `GET /api/info`, `GET /api/sessions`, `GET /api/whoami`
+  - `GET /api/hosts` — tailnet machines (via `tailscale status`) for auto-discovery
+  - `WS /ws/terminal?session=<name>` — streams the pane's **raw output** via
+    `tmux pipe-pane` (so xterm renders with native scrollback), primes new
+    viewers with `capture-pane`, takes input via `tmux send-keys -H`, and sizes
+    the pane to the active client via `resize-window`. No PTY/`tmux attach`.
   - *(Phase 2)* file API scoped to each session's cwd (`#{pane_current_path}`).
   - *(Phase 3)* `POST /api/upload` → save to cwd → `tmux send-keys` the path.
   Listens on `127.0.0.1:<port>`; `tailscale serve` fronts it with TLS.
@@ -64,10 +70,12 @@ Every device (workstations + your laptop/phone) joins one tailnet via
   - `agents-portal new -t <name> [tmux args…]` → `tmux new-session -A -s <name>`
     in `$PWD`; extra args pass through. Appears in the UI immediately.
   - `agents-portal ls / stop / config`
-- **web** — static SPA (xterm.js + Vite). Holds your host list (localStorage),
-  connects directly to each agent, one combined dashboard. Deployed to GitHub
-  Pages via Actions. Same bundle can instead be served by `tailscale serve` from
-  a host if you prefer a private `*.ts.net` entry URL.
+- **web** — SPA (xterm.js + Vite), **served by the agent** so opening
+  `https://<anyhost>.ts.net` is zero-config: it calls `/api/hosts`, auto-lists
+  every workstation, and connects directly to each (identity auth, no manual
+  add). Manually-added cross-tailnet hosts (with a token) are also supported and
+  stored in localStorage. Also deployed to GitHub Pages (base `/agents-portal/`)
+  as an optional fixed public entry.
 
 ### Lifecycle ("killing tmux kills the connection")
 
@@ -78,8 +86,10 @@ disappears from the dashboard — other sessions stay up. `agents-portal new
 ## Tech stack
 
 - TypeScript, **Node 20** (pinned via `.nvmrc` / `engines`). System node is v16 — must use nvm.
-- `node-pty` (PTY bridge), `ws` (terminal stream), `express` (REST + static).
-- Frontend: `xterm.js` + Vite; deployed to GitHub Pages.
+- `ws` (terminal stream), `express` (REST + static). No native deps — terminal
+  I/O is via the `tmux` CLI (`pipe-pane`/`capture-pane`/`send-keys`), so
+  `npm i -g` needs no C toolchain.
+- Frontend: `xterm.js` + Vite (Unicode 11 addon, native scrollback); agent-served.
 - Packaging: **npm global** (`npm i -g agents-portal`).
 
 ## Phases
