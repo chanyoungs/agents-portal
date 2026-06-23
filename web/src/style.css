@@ -1,0 +1,62 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+}
+#sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid #21262d;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+#sidebar header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid #21262d;
+}
+#sidebar button {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#hosts { list-style: none; margin: 0; padding: 0; }
+.host-name { padding: 10px 12px; font-weight: 600; color: #7d8590; font-size: 12px; text-transform: uppercase; }
+.session {
+  padding: 8px 12px 8px 20px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.session:hover { background: #161b22; }
+.session.active { background: #1f6feb33; }
+.session .dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
+.session .cwd { color: #7d8590; font-size: 11px; margin-left: auto; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#main { flex: 1; position: relative; min-width: 0; }
+#terminal { position: absolute; inset: 0; padding: 6px; }
+#placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7d8590;
+}
+
+@media (max-width: 640px) {
+  body { flex-direction: column; }
+  #sidebar { width: 100%; height: 40vh; }
+  #main { height: 60vh; }
+}
