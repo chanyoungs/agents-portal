@@ -115,6 +115,16 @@ export function parseClaudeLine(line: string): ChatEvent | null {
   } catch {
     return null;
   }
+  // Queued messages are persisted as queue-operation/enqueue (often the ONLY
+  // record — Claude doesn't always write a user event for them). Render them as
+  // user messages so they appear in the chat. (Dedup vs any user event is in
+  // the tailer.)
+  if (o.type === 'queue-operation') {
+    if (o.operation === 'enqueue' && typeof o.content === 'string' && o.content.trim()) {
+      return { role: 'user', blocks: [{ kind: 'text', text: o.content }], ts: o.timestamp };
+    }
+    return null;
+  }
   if (o.type !== 'user' && o.type !== 'assistant') return null;
   const content = o.message?.content;
   const blocks: ChatBlock[] = [];
@@ -150,6 +160,7 @@ export class TranscriptTailer {
   private offset = 0;
   private partial = '';
   private timer: ReturnType<typeof setInterval> | null = null;
+  private seenUser = new Set<string>(); // dedup a message that is both enqueue + user
 
   constructor(private file: string) {}
 
@@ -200,7 +211,16 @@ export class TranscriptTailer {
     for (const line of lines) {
       if (!line.trim()) continue;
       const ev = parseClaudeLine(line);
-      if (ev) fresh.push(ev);
+      if (!ev) continue;
+      if (ev.role === 'user') {
+        // a queued message can appear as both enqueue and user — show it once
+        const key = ev.blocks.filter((b) => b.kind === 'text').map((b) => b.text ?? '').join('').replace(/\s+/g, ' ').trim();
+        if (key) {
+          if (this.seenUser.has(key)) continue;
+          this.seenUser.add(key);
+        }
+      }
+      fresh.push(ev);
     }
     if (fresh.length === 0) return;
     this.events.push(...fresh);
