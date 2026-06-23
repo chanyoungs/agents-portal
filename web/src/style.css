@@ -122,7 +122,7 @@ body.hide-results .tr { display: none; }
 .cmd-src { color: #7d8590; font-size: 11px; }
 
 /* attach button (override the blue Send styling) */
-#chatinput #attach { flex: 0 0 auto; background: transparent; color: #7d8590; border: 1px solid #30363d; border-radius: 8px; padding: 0 10px; font-size: 16px; cursor: pointer; }
+#chatinput #attach { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; background: transparent; color: #7d8590; border: 1px solid #30363d; border-radius: 8px; padding: 0 10px; cursor: pointer; }
 
 /* floating controls within #main */
 #scrollbottom { position: absolute; right: 14px; bottom: 78px; z-index: 40; width: 38px; height: 38px; border-radius: 50%; background: #1f6feb; color: #fff; border: 0; font-size: 18px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
