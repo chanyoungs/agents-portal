@@ -219,18 +219,19 @@ export function startAgent(cfg: Config): { close: () => void } {
 
     const BUSY_RE = /…[^\n]*tokens\)|esc to interrupt/i;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const isAgentBusy = async () => BUSY_RE.test(await paneVisible(pane));
-    const waitFor = async (want: boolean, timeoutMs: number) => {
-      for (let t = 0; t < timeoutMs; t += 250) {
-        if ((await isAgentBusy()) === want) return true;
-        await sleep(250);
-      }
-      return false;
+
+    // True once the agent's input box is empty again — i.e. the message we just
+    // pasted has been submitted (idle) or moved to the native queue (busy).
+    const inputCleared = async (): Promise<boolean> => {
+      const lines = (await paneVisible(pane)).split('\n');
+      const prompt = [...lines].reverse().find((l) => l.includes('❯'));
+      if (!prompt) return true;
+      return prompt.replace(/.*❯/, '').trim().length === 0;
     };
 
-    // Deliver each message as its OWN turn: wait until the agent is idle (ready
-    // for input), paste + Enter, then wait until it starts working — so rapidly
-    // queued messages stay separate instead of lumping into one input.
+    // Use Claude's NATIVE queue: paste + Enter immediately (Claude queues it and
+    // runs it after the current tool calls). Between consecutive messages, wait
+    // until the input box clears so each is registered separately (no lumping).
     let queue: Promise<void> = Promise.resolve();
     ws.on('message', (raw) => {
       try {
@@ -238,10 +239,13 @@ export function startAgent(cfg: Config): { close: () => void } {
         if (msg.type === 'input') {
           const data = msg.data;
           queue = queue.then(async () => {
-            await waitFor(false, 180000); // agent ready
             await sendText(pane, data); // bracketed paste (multi-line safe)
             await sendEnter(pane);
-            await waitFor(true, 4000); // it picked the message up before the next
+            for (let t = 0; t < 4000; t += 200) {
+              if (await inputCleared()) break;
+              await sleep(200);
+            }
+            await sleep(150);
           });
         }
       } catch {
