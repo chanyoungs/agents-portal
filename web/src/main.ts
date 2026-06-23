@@ -23,13 +23,14 @@ let current: { host: Host; session: SessionInfo } | null = null;
 let chatWs: WebSocket | null = null;
 let pending: { text: string; el: HTMLElement }[] = [];
 let commands: { name: string; builtin: boolean }[] = [];
-let prompts: { text: string; el: HTMLElement }[] = []; // user messages, for the chapters menu
 
 // ── mobile menu (sidebar drawer) ─────────────────────────────────────────────
 const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
-const openMenu = () => document.body.classList.add('menu-open');
-const closeMenu = () => document.body.classList.remove('menu-open');
-const toggleMenu = () => document.body.classList.toggle('menu-open');
+const savedMenu = localStorage.getItem('ap.menu'); // read before anything mutates it
+const persistMenu = () => localStorage.setItem('ap.menu', document.body.classList.contains('menu-open') ? '1' : '0');
+const openMenu = () => { document.body.classList.add('menu-open'); persistMenu(); };
+const closeMenu = () => { document.body.classList.remove('menu-open'); persistMenu(); };
+const toggleMenu = () => { document.body.classList.toggle('menu-open'); persistMenu(); };
 menuToggle.addEventListener('click', toggleMenu);
 backdrop.addEventListener('click', closeMenu);
 
@@ -171,29 +172,24 @@ chatEl.addEventListener('scroll', () => {
   scrollBtn.hidden = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
 });
 
-// chapters: jump to a previous user message
-const chaptersBtn = document.createElement('button');
-chaptersBtn.id = 'chapters';
-chaptersBtn.title = 'Jump to a message';
-chaptersBtn.textContent = '≡';
-chaptersBtn.hidden = true;
-main.appendChild(chaptersBtn);
-const chapterList = document.createElement('div');
-chapterList.id = 'chapterlist';
-chapterList.hidden = true;
-main.appendChild(chapterList);
-chaptersBtn.addEventListener('click', () => {
-  if (!chapterList.hidden) { chapterList.hidden = true; return; }
-  chapterList.innerHTML = '';
-  for (const p of prompts) {
-    const it = document.createElement('div');
-    it.className = 'chapter-item';
-    it.textContent = p.text.replace(/\s+/g, ' ').slice(0, 70);
-    it.addEventListener('click', () => { p.el.scrollIntoView({ block: 'start', behavior: 'smooth' }); chapterList.hidden = true; });
-    chapterList.appendChild(it);
-  }
-  chapterList.hidden = prompts.length === 0;
-});
+// chapters: a sidebar section listing this session's user messages
+const chaptersSection = document.createElement('div');
+chaptersSection.id = 'chapters-section';
+chaptersSection.hidden = true;
+chaptersSection.innerHTML = '<div class="sec-title">Messages</div><ul id="chapter-list"></ul>';
+sidebar.appendChild(chaptersSection);
+const chapterListEl = chaptersSection.querySelector('#chapter-list')!;
+
+function addChapter(text: string, target: HTMLElement): void {
+  const li = document.createElement('li');
+  li.className = 'chapter-item';
+  li.textContent = text.replace(/\s+/g, ' ').slice(0, 60);
+  li.addEventListener('click', () => {
+    target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (isMobile()) closeMenu();
+  });
+  chapterListEl.appendChild(li);
+}
 
 // ── hosts / discovery ───────────────────────────────────────────────────────
 async function discoverHosts(): Promise<Host[]> {
@@ -227,11 +223,31 @@ async function render(): Promise<void> {
     for (const s of sessions) {
       const li = document.createElement('li');
       li.className = 'session';
+      li.dataset.host = host.url;
+      li.dataset.session = s.name;
       li.innerHTML = `<span class="dot"></span><span>${s.name}</span><span class="cwd">${s.cwd.split('/').pop() ?? ''}</span>`;
       li.addEventListener('click', () => openSession(host, s, li));
       hostsEl.appendChild(li);
     }
   }
+  restoreSession();
+  // apply the cached drawer state last so restore can't clobber it
+  if (savedMenu === '1') openMenu();
+  else if (savedMenu === '0') closeMenu();
+  else if (isMobile()) openMenu();
+}
+
+// re-open the previously selected session (if it still exists)
+function restoreSession(): void {
+  const raw = localStorage.getItem('ap.session');
+  if (!raw) return;
+  try {
+    const { hostUrl, sessionName } = JSON.parse(raw);
+    const li = hostsEl.querySelector(
+      `.session[data-host="${CSS.escape(hostUrl)}"][data-session="${CSS.escape(sessionName)}"]`,
+    ) as HTMLElement | null;
+    li?.click();
+  } catch { /* ignore */ }
 }
 
 // ── session + conversation view ──────────────────────────────────────────────
@@ -243,7 +259,8 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   placeholder.style.display = 'none';
   chatEl.hidden = false;
   chatForm.hidden = false;
-  chaptersBtn.hidden = false;
+  chaptersSection.hidden = false;
+  localStorage.setItem('ap.session', JSON.stringify({ hostUrl: host.url, sessionName: session.name }));
   connectChat();
   void loadCommands();
   if (isMobile()) closeMenu(); // picking a session collapses the drawer on mobile
@@ -262,7 +279,7 @@ function connectChat(): void {
   closeChat();
   chatEl.innerHTML = '';
   pending = [];
-  prompts = [];
+  chapterListEl.innerHTML = '';
   thinkingEl.hidden = true;
   let firstBatch = true; // don't animate the initial history dump
   chatWs = new WebSocket(wsUrl(current.host, '/ws/chat', { session: current.session.name }));
@@ -338,7 +355,7 @@ function renderEvent(e: ChatEvent): HTMLElement {
     who.textContent = 'You';
     wrap.appendChild(who);
     const t = eventUserText(e);
-    if (t) prompts.push({ text: t, el: wrap }); // for the chapters menu
+    if (t) addChapter(t, wrap); // sidebar "Messages" jump list
   }
   for (const b of e.blocks) {
     if (b.kind === 'text' && b.text) {
@@ -379,5 +396,4 @@ function renderToolUse(b: ChatBlock): HTMLElement {
   return det;
 }
 
-render();
-if (isMobile()) openMenu(); // start with the session list visible on mobile
+render(); // builds the session list, then restores the cached session + drawer state
