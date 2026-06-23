@@ -193,10 +193,11 @@ function renderEvent(e: ChatEvent): HTMLElement {
   wrap.className = `msg ${e.role}`;
   // A "user" event that is only tool_result blocks is tool output, not a person.
   const isToolOutput = e.role === 'user' && e.blocks.length > 0 && e.blocks.every((b) => b.kind === 'tool_result');
-  if (!isToolOutput) {
+  // Label only genuine user messages; agent replies are unlabelled.
+  if (e.role === 'user' && !isToolOutput) {
     const who = document.createElement('div');
     who.className = 'who';
-    who.textContent = e.role === 'user' ? 'You' : 'Agent';
+    who.textContent = 'You';
     wrap.appendChild(who);
   }
   for (const b of e.blocks) {

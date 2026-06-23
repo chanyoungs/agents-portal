@@ -64,7 +64,9 @@ body.hide-results .tr { display: none; }
 .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #7d8590; margin-bottom: 4px; }
 .msg.pending { opacity: .55; }
 .msg.pending .queued { color: #d29922; border: 1px solid #d29922; border-radius: 4px; font-size: 9px; padding: 0 4px; margin-left: 6px; letter-spacing: .02em; }
-.msg.user .bubble { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 8px 12px; }
+.msg.user { max-width: min(560px, 88%); margin-left: auto; }
+.msg.user .who { text-align: right; color: #58a6ff; }
+.msg.user .bubble { background: #1f6feb26; border: 1px solid #1f6feb66; border-radius: 12px; padding: 9px 13px; }
 .msg .bubble :first-child { margin-top: 0; }
 .msg .bubble :last-child { margin-bottom: 0; }
 .msg pre { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 10px; overflow-x: auto; max-width: 100%; font-size: 13px; }
