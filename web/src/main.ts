@@ -1,7 +1,3 @@
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { Unicode11Addon } from '@xterm/addon-unicode11';
-import '@xterm/xterm/css/xterm.css';
 import { marked } from 'marked';
 
 interface Host { name: string; url: string; token?: string }
@@ -11,41 +7,35 @@ interface ChatEvent { role: 'user' | 'assistant'; blocks: ChatBlock[]; ts?: stri
 
 const STORE_KEY = 'agents-portal.hosts';
 const loadManual = (): Host[] => JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]');
-const saveManual = (h: Host[]) => localStorage.setItem(STORE_KEY, JSON.stringify(h));
 
 const $ = (id: string) => document.getElementById(id)!;
 const hostsEl = $('hosts');
 const placeholder = $('placeholder');
-const termEl = $('terminal');
 const chatEl = $('chat');
-const toolbar = $('toolbar') as HTMLElement;
 const topbar = $('topbar') as HTMLElement;
 const chatForm = $('chatinput') as HTMLFormElement;
 const chatbox = $('chatbox') as HTMLTextAreaElement;
 const sessionLabel = $('session-label');
+const menuToggle = $('menu-toggle');
+const backdrop = $('backdrop');
 
 let activeEl: HTMLElement | null = null;
 let current: { host: Host; session: SessionInfo } | null = null;
-let view: 'chat' | 'term' = 'chat';
-
-// terminal state
-let term: Terminal | null = null;
-let fit: FitAddon | null = null;
-let termWs: WebSocket | null = null;
-// chat state
 let chatWs: WebSocket | null = null;
 
-$('add-host').addEventListener('click', addHostPrompt);
-setupToolbar();
-setupTouchScroll();
-for (const b of topbar.querySelectorAll('button')) {
-  b.addEventListener('click', () => showView((b as HTMLElement).dataset.view as 'chat' | 'term'));
-}
+// ── mobile menu (sidebar drawer) ─────────────────────────────────────────────
+const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
+const openMenu = () => document.body.classList.add('menu-open');
+const closeMenu = () => document.body.classList.remove('menu-open');
+const toggleMenu = () => document.body.classList.toggle('menu-open');
+menuToggle.addEventListener('click', toggleMenu);
+backdrop.addEventListener('click', closeMenu);
+
 chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = chatbox.value;
   if (!text.trim() || chatWs?.readyState !== WebSocket.OPEN) return;
-  chatWs.send(JSON.stringify({ type: 'input', data: text + '\r' }));
+  chatWs.send(JSON.stringify({ type: 'input', data: text }));
   chatbox.value = '';
   chatbox.style.height = 'auto';
 });
@@ -54,55 +44,7 @@ chatbox.addEventListener('input', () => {
   chatbox.style.height = Math.min(chatbox.scrollHeight, window.innerHeight * 0.4) + 'px';
 });
 
-// ── terminal helpers ────────────────────────────────────────────────────────
-const b64ToBytes = (s: string): Uint8Array => {
-  const bin = atob(s);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return arr;
-};
-const KEYS: Record<string, string> = {
-  esc: '\x1b', tab: '\t', ctrlc: '\x03',
-  up: '\x1b[A', down: '\x1b[B', left: '\x1b[D', right: '\x1b[C',
-};
-function termSend(data: string): void {
-  if (termWs?.readyState === WebSocket.OPEN) termWs.send(JSON.stringify({ type: 'input', data }));
-}
-function setupToolbar(): void {
-  for (const btn of toolbar.querySelectorAll('button')) {
-    const key = (btn as HTMLElement).dataset.key ?? '';
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (key === 'pageup') term?.scrollPages(-1);
-      else if (key === 'pagedown') term?.scrollPages(1);
-      else if (KEYS[key]) termSend(KEYS[key]);
-      term?.focus();
-    });
-  }
-}
-function setupTouchScroll(): void {
-  let lastY = 0, accum = 0;
-  const STEP = 16;
-  termEl.addEventListener('touchstart', (e) => { lastY = e.touches[0].clientY; accum = 0; }, { passive: true });
-  termEl.addEventListener('touchmove', (e) => {
-    accum += e.touches[0].clientY - lastY;
-    lastY = e.touches[0].clientY;
-    while (Math.abs(accum) >= STEP) { term?.scrollLines(accum > 0 ? -1 : 1); accum += accum > 0 ? -STEP : STEP; }
-    e.preventDefault();
-  }, { passive: false });
-}
-
 // ── hosts / discovery ───────────────────────────────────────────────────────
-function addHostPrompt(): void {
-  const url = prompt('Host URL (e.g. https://workstationA.tailnet.ts.net)')?.trim();
-  if (!url) return;
-  const token = prompt('Token (leave blank if on the same tailnet)')?.trim() || undefined;
-  const name = prompt('Display name', new URL(url).hostname)?.trim() || url;
-  const hosts = loadManual();
-  hosts.push({ name, url: url.replace(/\/$/, ''), token });
-  saveManual(hosts);
-  render();
-}
 async function discoverHosts(): Promise<Host[]> {
   const hosts: Host[] = [];
   try {
@@ -141,7 +83,7 @@ async function render(): Promise<void> {
   }
 }
 
-// ── session + views ─────────────────────────────────────────────────────────
+// ── session + conversation view ──────────────────────────────────────────────
 function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   activeEl?.classList.remove('active');
   el.classList.add('active');
@@ -150,26 +92,10 @@ function openSession(host: Host, session: SessionInfo, el: HTMLElement): void {
   placeholder.style.display = 'none';
   topbar.hidden = false;
   sessionLabel.textContent = `${host.name} / ${session.name}`;
-  showView('chat'); // web-friendly by default; falls back to terminal if no transcript
-}
-
-function showView(v: 'chat' | 'term'): void {
-  if (!current) return;
-  view = v;
-  for (const b of topbar.querySelectorAll('button')) {
-    (b as HTMLElement).classList.toggle('active', (b as HTMLElement).dataset.view === v);
-  }
-  if (v === 'chat') {
-    closeTerminal();
-    termEl.hidden = true; toolbar.hidden = true;
-    chatEl.hidden = false; chatForm.hidden = false;
-    connectChat();
-  } else {
-    closeChat();
-    chatEl.hidden = true; chatForm.hidden = true;
-    termEl.hidden = false; toolbar.hidden = false;
-    connectTerminal();
-  }
+  chatEl.hidden = false;
+  chatForm.hidden = false;
+  connectChat();
+  if (isMobile()) closeMenu(); // picking a session collapses the drawer on mobile
 }
 
 function wsUrl(host: Host, path: string, params: Record<string, string>): string {
@@ -178,7 +104,6 @@ function wsUrl(host: Host, path: string, params: Record<string, string>): string
   return `${host.url.replace(/^http/, 'ws')}${path}?${q}`;
 }
 
-// ── conversation view ───────────────────────────────────────────────────────
 function closeChat(): void { chatWs?.close(); chatWs = null; }
 
 function connectChat(): void {
@@ -188,7 +113,10 @@ function connectChat(): void {
   chatWs = new WebSocket(wsUrl(current.host, '/ws/chat', { session: current.session.name }));
   chatWs.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === 'chat-error') { showView('term'); return; }
+    if (msg.type === 'chat-error') {
+      chatEl.innerHTML = '<div class="empty">No conversation transcript for this session.</div>';
+      return;
+    }
     if (msg.type !== 'chat') return;
     const nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
     const frag = document.createDocumentFragment();
@@ -253,36 +181,6 @@ function renderToolUse(b: ChatBlock): HTMLElement {
   }
   det.innerHTML = summary + body;
   return det;
-}
-
-// ── terminal view ───────────────────────────────────────────────────────────
-function closeTerminal(): void { termWs?.close(); termWs = null; term?.dispose(); term = null; }
-
-function connectTerminal(): void {
-  if (!current) return;
-  closeTerminal();
-  term = new Terminal({
-    cursorBlink: true, fontSize: 13, scrollback: 5000,
-    fontFamily: 'ui-monospace, "DejaVu Sans Mono", Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace',
-    theme: { background: '#0d1117' }, allowProposedApi: true,
-  });
-  fit = new FitAddon();
-  term.loadAddon(fit);
-  term.loadAddon(new Unicode11Addon());
-  term.unicode.activeVersion = '11';
-  term.open(termEl);
-  fit.fit();
-  termWs = new WebSocket(wsUrl(current.host, '/ws/terminal', { session: current.session.name, cols: String(term.cols), rows: String(term.rows) }));
-  termWs.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === 'output') term!.write(b64ToBytes(msg.data));
-    else if (msg.type === 'closed') term!.write(`\r\n[${msg.reason}]\r\n`);
-  };
-  term.onData((data) => termSend(data));
-  window.addEventListener('resize', () => {
-    fit?.fit();
-    if (term && termWs?.readyState === WebSocket.OPEN) termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-  });
 }
 
 render();

@@ -94,13 +94,45 @@ export async function resizeWindow(session: string, cols: number, rows: number):
   }
 }
 
-/** Write raw input bytes to a session as hex key events (handles any byte). */
-export async function sendRaw(session: string, data: string): Promise<void> {
+/** Write raw input bytes to a target (session or pane id) as hex key events. */
+export async function sendRaw(target: string, data: string): Promise<void> {
   const hex = Buffer.from(data, 'utf8').toString('hex').match(/.{2}/g);
   if (!hex) return;
   try {
-    await exec('tmux', ['send-keys', '-t', session, '-H', ...hex]);
+    await exec('tmux', ['send-keys', '-t', target, '-H', ...hex]);
   } catch {
     // non-fatal
+  }
+}
+
+/** Send a proper Enter keypress (submits in most TUIs). */
+export async function sendEnter(target: string): Promise<void> {
+  try {
+    await exec('tmux', ['send-keys', '-t', target, 'Enter']);
+  } catch {
+    // non-fatal
+  }
+}
+
+/**
+ * Find the pane actually running the agent in a session, so chat input goes to
+ * Claude/Codex rather than whatever window happens to be active. Prefers an
+ * agent-like command at the transcript's cwd; falls back to the session.
+ */
+export async function findAgentPane(session: string, cwd: string): Promise<string> {
+  try {
+    const { stdout } = await exec('tmux', [
+      'list-panes', '-s', '-t', session,
+      '-F', '#{pane_id}\t#{pane_current_command}\t#{pane_current_path}',
+    ]);
+    const rows = stdout.split('\n').filter(Boolean).map((l) => l.split('\t'));
+    const agent = /^(claude|codex|node|bun|deno|python|python3)$/;
+    const pick =
+      rows.find(([, cmd, p]) => p === cwd && agent.test(cmd)) ??
+      rows.find(([, , p]) => p === cwd) ??
+      rows.find(([, cmd]) => agent.test(cmd));
+    return pick ? pick[0] : session;
+  } catch {
+    return session;
   }
 }

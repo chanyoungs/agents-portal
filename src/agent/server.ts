@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Config } from '../config.js';
-import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw } from './tmux.js';
+import { listSessions, sessionCwd, capturePane, startPipe, stopPipe, resizeWindow, sendRaw, sendEnter, findAgentPane } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
 import { findClaudeTranscript, TranscriptTailer } from './transcript.js';
 import {
@@ -180,6 +180,9 @@ export function startAgent(cfg: Config): { close: () => void } {
       ws.send(encode({ type: 'chat-error', reason: `no Claude transcript for ${cwd}` }));
       return ws.close();
     }
+    // Send chat input to the pane actually running the agent (not whatever
+    // window is active), then a real Enter to submit.
+    const pane = await findAgentPane(session, cwd);
 
     let tailer = tailers.get(file);
     if (!tailer) {
@@ -194,7 +197,7 @@ export function startAgent(cfg: Config): { close: () => void } {
     ws.on('message', (raw) => {
       try {
         const msg = decode<ClientToAgent>(raw as Buffer);
-        if (msg.type === 'input') void sendRaw(session, msg.data);
+        if (msg.type === 'input') void (async () => { await sendRaw(pane, msg.data); await sendEnter(pane); })();
       } catch {
         /* ignore */
       }
