@@ -17,7 +17,7 @@ import type { Config } from '../config.js';
 import * as pty from 'node-pty';
 import { listSessions, sessionCwd, sendText, sendEnter, findAgentPane, paneVisible, newGroupedSession, killSession, killStaleGroups, claudeSessions } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
-import { resolveTranscript, TranscriptTailer } from './transcript.js';
+import { resolveTranscript, transcriptForSession, TranscriptTailer } from './transcript.js';
 import { listCommands } from './commands.js';
 import {
   PROTOCOL_VERSION,
@@ -124,14 +124,13 @@ export function startAgent(cfg: Config): { close: () => void } {
     const url = new URL(req.url ?? '', 'http://localhost');
     const session = url.searchParams.get('session');
     if (!session) return ws.close();
-    // Map THIS session to its own transcript (sessions can share a cwd) by
-    // matching the Claude process start time to the nearest transcript, assigned
-    // uniquely across same-cwd sessions.
+    // Map THIS session to its transcript. Prefer the exact session id from
+    // ~/.claude/sessions/<pid>.json; fall back to start-time matching.
     const allClaude = await claudeSessions();
     const me = allClaude.find((s) => s.session === session);
     const cwd = me ? me.cwd : await sessionCwd(session);
-    const sameCwd = allClaude.filter((s) => s.cwd === cwd);
-    const file = resolveTranscript(cwd, session, sameCwd, Date.now());
+    let file = me?.sessionId ? transcriptForSession(cwd, me.sessionId) : null;
+    if (!file) file = resolveTranscript(cwd, session, allClaude.filter((s) => s.cwd === cwd), Date.now());
     if (!file) {
       ws.send(encode({ type: 'chat-error', reason: `no Claude transcript for ${cwd}` }));
       return ws.close();

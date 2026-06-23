@@ -50,6 +50,12 @@ export function findClaudeTranscript(cwd: string): string | null {
   return newestJsonl(join(CLAUDE_PROJECTS, claudeSlug(cwd)));
 }
 
+/** Exact transcript path for a known session id (from ~/.claude/sessions). */
+export function transcriptForSession(cwd: string, sessionId: string): string | null {
+  const p = join(CLAUDE_PROJECTS, claudeSlug(cwd), `${sessionId}.jsonl`);
+  return existsSync(p) ? p : null;
+}
+
 /** Event timestamps (epoch seconds) in a transcript, via a fast line scan. */
 function eventTimes(file: string): number[] {
   const out: number[] = [];

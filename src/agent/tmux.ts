@@ -2,6 +2,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { SessionInfo } from '../shared/protocol.js';
 
 const exec = promisify(execFile);
@@ -9,8 +11,12 @@ const exec = promisify(execFile);
 export interface ClaudeSession {
   session: string;
   cwd: string;
-  /** Unix seconds the Claude process started (for transcript matching). */
+  /** Unix seconds the Claude process started (fallback transcript matching). */
   start: number;
+  /** Exact transcript session id, from ~/.claude/sessions/<pid>.json. */
+  sessionId?: string;
+  /** Live status from the session file: 'busy' | 'idle'. */
+  status?: string;
 }
 
 function bootTime(): number {
@@ -73,7 +79,17 @@ export async function claudeSessions(): Promise<ClaudeSession[]> {
     const info = table.get(cp);
     if (!info) continue;
     const start = btime + info.start / 100; // USER_HZ = 100 on Linux
-    if (!out.has(session)) out.set(session, { session, cwd, start });
+    // Exact session id + live status from ~/.claude/sessions/<pid>.json.
+    let sessionId: string | undefined;
+    let status: string | undefined;
+    let realCwd = cwd;
+    try {
+      const sf = JSON.parse(readFileSync(join(homedir(), '.claude', 'sessions', `${cp}.json`), 'utf8'));
+      sessionId = sf.sessionId;
+      status = sf.status;
+      if (sf.cwd) realCwd = sf.cwd;
+    } catch { /* no session file */ }
+    if (!out.has(session)) out.set(session, { session, cwd: realCwd, start, sessionId, status });
   }
   return [...out.values()];
 }
