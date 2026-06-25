@@ -7,7 +7,7 @@ import { createDockview, type DockviewApi } from 'dockview-core';
 import 'dockview-core/dist/styles/dockview.css';
 
 interface Host { name: string; url: string; token?: string }
-interface SessionInfo { name: string; windows: number; cwd: string; attached: boolean; created: number }
+interface SessionInfo { name: string; windows: number; cwd: string; attached: boolean; created: number; agent?: string }
 interface ChatBlock { kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image'; text?: string; tool?: string; input?: any; result?: string; isError?: boolean; image?: string }
 interface ChatEvent { role: 'user' | 'assistant'; blocks: ChatBlock[]; ts?: string; uuid?: string; cwd?: string }
 
@@ -26,6 +26,26 @@ const openMenu = () => { document.body.classList.add('menu-open'); persistMenu()
 const closeMenu = () => { document.body.classList.remove('menu-open'); persistMenu(); };
 menuToggle.addEventListener('click', () => { document.body.classList.toggle('menu-open'); persistMenu(); });
 backdrop.addEventListener('click', closeMenu);
+
+// ── new-version notification + refresh ──────────────────────────────────────
+const myBundle = (import.meta.url.match(/index-[\w-]+\.js/) || [''])[0];
+function showUpdateBanner(): void {
+  if (document.getElementById('update-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'update-banner';
+  b.innerHTML = '<span>🔄 A new version is available.</span><button>Refresh</button>';
+  b.querySelector('button')!.addEventListener('click', () => location.reload());
+  document.body.appendChild(b);
+}
+async function checkUpdate(): Promise<void> {
+  try {
+    const res = await fetch(location.href, { cache: 'no-store' });
+    if (!res.ok) return;
+    const m = (await res.text()).match(/index-[\w-]+\.js/);
+    if (m && myBundle && m[0] !== myBundle) showUpdateBanner();
+  } catch { /* offline */ }
+}
+if (myBundle) setInterval(checkUpdate, 60000);
 
 // ── global view filters (hide tool calls / results across all panes) ────────
 function setupFilters(): void {
@@ -416,7 +436,8 @@ async function render(): Promise<void> {
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'sess-cb'; cb.dataset.id = id; cb.checked = !!panelApi(id);
       cb.addEventListener('change', () => { if (cb.checked) openPane(host, s.name); else closePane(host, s.name); if (isMobile() && cb.checked) closeMenu(); });
       const label = document.createElement('span'); label.className = 'sess-label';
-      label.innerHTML = `<span>${s.name}</span><span class="cwd">${s.cwd.split('/').pop() ?? ''}</span>`;
+      const badge = s.agent ? `<span class="agent-badge ${s.agent}">${s.agent}</span>` : '';
+      label.innerHTML = `<span>${s.name}</span>${badge}<span class="cwd">${s.cwd.split('/').pop() ?? ''}</span>`;
       label.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
       li.append(cb, label); hostsEl.appendChild(li);
     }

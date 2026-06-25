@@ -67,7 +67,10 @@ export function startAgent(cfg: Config): { close: () => void } {
 
   app.get('/api/sessions', async (req, res) => {
     if (!authed(req)) return res.sendStatus(401);
-    res.json(await listSessions());
+    const sessions = await listSessions();
+    const byName = new Map((await agentSessions()).map((a) => [a.session, a.agent]));
+    for (const s of sessions) s.agent = byName.get(s.name);
+    res.json(sessions);
   });
 
   app.get('/api/hosts', async (req, res) => {
@@ -235,12 +238,14 @@ export function startAgent(cfg: Config): { close: () => void } {
       // lines) so conversation text can't trigger false matches.
       const footer = text.split('\n').filter((l) => l.trim()).slice(-6).join('\n');
       const ctx = footer.match(/Context(?:\s+left)?:\s*([\d.]+)%/i);
-      const model = footer.match(/^\s*([A-Za-z][\w.\- ]*?(?:\([^)]*\))?)\s{2,}Context:/m);
+      // Claude footer: "<model>  Context: …". Codex footer: "<model …> · /cwd".
+      const cModel = footer.match(/^\s*([A-Za-z][\w.\- ]*?(?:\([^)]*\))?)\s{2,}Context:/m);
+      const xModel = footer.match(/^\s*([A-Za-z][\w.\- ]*?)\s+·\s+\//m);
       const think = footer.match(/\bthinking\b(?:[:\s]+(on|off|\w+))?/i);
       const payload = {
         type: 'status',
         busy,
-        model: model ? model[1].trim() : null,
+        model: cModel ? cModel[1].trim() : xModel ? xModel[1].trim() : null,
         context: ctx ? Number(ctx[1]) : null,
         thinking: think ? (think[1] ?? 'on') : null,
       };

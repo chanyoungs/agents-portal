@@ -16,6 +16,8 @@ export interface SessionInfo {
   attached: boolean;
   /** Unix seconds the session was created. */
   created: number;
+  /** Coding agent running in the session, if any ('claude' | 'codex'). */
+  agent?: string;
 }
 
 /** GET /api/info response — also used as a token/liveness check. */
