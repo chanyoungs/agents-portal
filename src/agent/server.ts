@@ -15,9 +15,9 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Config } from '../config.js';
 import * as pty from 'node-pty';
-import { listSessions, sessionCwd, sendText, sendEnter, findAgentPane, paneVisible, newGroupedSession, killSession, killStaleGroups, claudeSessions } from './tmux.js';
+import { listSessions, sessionCwd, sendText, sendEnter, findAgentPane, paneVisible, newGroupedSession, killSession, killStaleGroups, agentSessions } from './tmux.js';
 import { listPeers, identityLogin } from './tailscale.js';
-import { resolveTranscript, transcriptForSession, TranscriptTailer } from './transcript.js';
+import { resolveTranscript, transcriptForSession, findCodexTranscript, parseClaudeLine, parseCodexLine, TranscriptTailer } from './transcript.js';
 import { listCommands } from './commands.js';
 import {
   PROTOCOL_VERSION,
@@ -151,15 +151,24 @@ export function startAgent(cfg: Config): { close: () => void } {
     const url = new URL(req.url ?? '', 'http://localhost');
     const session = url.searchParams.get('session');
     if (!session) return ws.close();
-    // Map THIS session to its transcript. Prefer the exact session id from
-    // ~/.claude/sessions/<pid>.json; fall back to start-time matching.
-    const allClaude = await claudeSessions();
-    const me = allClaude.find((s) => s.session === session);
+    // Map THIS session to its transcript, and pick the right parser per agent.
+    const all = await agentSessions();
+    const me = all.find((s) => s.session === session);
     const cwd = me ? me.cwd : await sessionCwd(session);
-    let file = me?.sessionId ? transcriptForSession(cwd, me.sessionId) : null;
-    if (!file) file = resolveTranscript(cwd, session, allClaude.filter((s) => s.cwd === cwd), Date.now());
+    let file: string | null;
+    let parse = parseClaudeLine;
+    let dedup = true;
+    if (me?.agent === 'codex') {
+      file = findCodexTranscript(cwd);
+      parse = parseCodexLine;
+      dedup = false; // codex has no enqueue/user duplication
+    } else {
+      // Claude: exact session id from ~/.claude/sessions/<pid>.json; else heuristic.
+      file = me?.sessionId ? transcriptForSession(cwd, me.sessionId) : null;
+      if (!file) file = resolveTranscript(cwd, session, all.filter((s) => s.agent === 'claude' && s.cwd === cwd), Date.now());
+    }
     if (!file) {
-      ws.send(encode({ type: 'chat-error', reason: `no Claude transcript for ${cwd}` }));
+      ws.send(encode({ type: 'chat-error', reason: `no transcript for ${cwd}` }));
       return ws.close();
     }
     // Send chat input to the pane actually running the agent (not whatever
@@ -168,7 +177,7 @@ export function startAgent(cfg: Config): { close: () => void } {
 
     let tailer = tailers.get(file);
     if (!tailer) {
-      tailer = new TranscriptTailer(file);
+      tailer = new TranscriptTailer(file, parse, dedup);
       tailer.start();
       tailers.set(file, tailer);
     }

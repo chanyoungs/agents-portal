@@ -58,6 +58,7 @@ const norm = (s: string): string => s.replace(/\s+/g, ' ').trim();
 const summarize = (input: any): string => {
   if (!input) return '';
   if (typeof input.command === 'string') return input.command.split('\n')[0].slice(0, 80);
+  if (typeof input.cmd === 'string') return input.cmd.split('\n')[0].slice(0, 80); // codex exec_command
   if (typeof input.file_path === 'string') return input.file_path;
   if (typeof input.path === 'string') return input.path;
   if (typeof input.pattern === 'string') return input.pattern;

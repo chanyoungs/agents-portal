@@ -172,6 +172,80 @@ export function parseClaudeLine(line: string): ChatEvent | null {
   return { role: o.type, blocks, ts: o.timestamp, uuid: o.uuid, cwd: o.cwd };
 }
 
+export type LineParser = (line: string) => ChatEvent | null;
+
+// ── Codex (OpenAI Codex CLI) ────────────────────────────────────────────────
+// Rollout JSONL: {timestamp, type, payload}. Clean text comes from event_msg
+// (user_message/agent_message); tool calls from response_item function/custom
+// tool calls + outputs. (Reasoning is encrypted, so it's skipped.)
+const CODEX_SESSIONS = join(homedir(), '.codex', 'sessions');
+
+export function parseCodexLine(line: string): ChatEvent | null {
+  let o: any;
+  try { o = JSON.parse(line); } catch { return null; }
+  const p = o.payload;
+  if (!p) return null;
+  const ts = o.timestamp;
+  if (o.type === 'event_msg') {
+    if (p.type === 'user_message' && typeof p.message === 'string' && p.message.trim()) return { role: 'user', blocks: [{ kind: 'text', text: p.message }], ts };
+    if (p.type === 'agent_message' && typeof p.message === 'string' && p.message.trim()) return { role: 'assistant', blocks: [{ kind: 'text', text: p.message }], ts };
+    return null;
+  }
+  if (o.type === 'response_item') {
+    if (p.type === 'function_call' || p.type === 'custom_tool_call') {
+      let input: unknown = p.input;
+      if (p.type === 'function_call') { try { input = JSON.parse(p.arguments); } catch { input = p.arguments; } }
+      return { role: 'assistant', blocks: [{ kind: 'tool_use', tool: p.name, input }], ts };
+    }
+    if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output') {
+      const out = typeof p.output === 'string' ? p.output : JSON.stringify(p.output ?? '');
+      return { role: 'user', blocks: [{ kind: 'tool_result', result: out }], ts };
+    }
+    return null;
+  }
+  return null;
+}
+
+/** Most-recent rollout files (newest first), across the date-partitioned tree. */
+function recentRollouts(limit = 40): string[] {
+  if (!existsSync(CODEX_SESSIONS)) return [];
+  const out: string[] = [];
+  const desc = (d: string) => { try { return readdirSync(d).sort().reverse(); } catch { return []; } };
+  for (const y of desc(CODEX_SESSIONS)) {
+    for (const m of desc(join(CODEX_SESSIONS, y))) {
+      for (const day of desc(join(CODEX_SESSIONS, y, m))) {
+        const dp = join(CODEX_SESSIONS, y, m, day);
+        for (const f of desc(dp)) if (f.endsWith('.jsonl')) { out.push(join(dp, f)); if (out.length >= limit) return out; }
+      }
+    }
+  }
+  return out;
+}
+
+const codexCwd = (file: string): string | null => {
+  try {
+    // read just the first line (session_meta can be tens of KB)
+    const fd = openSync(file, 'r');
+    const buf = Buffer.alloc(131072);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    closeSync(fd);
+    const chunk = buf.toString('utf8', 0, n);
+    const nl = chunk.indexOf('\n');
+    const o = JSON.parse(nl >= 0 ? chunk.slice(0, nl) : chunk);
+    return o?.type === 'session_meta' ? (o.payload?.cwd ?? null) : null;
+  } catch { return null; }
+};
+
+/** Active Codex rollout for a cwd: newest-modified rollout whose meta cwd matches. */
+export function findCodexTranscript(cwd: string): string | null {
+  const files = recentRollouts(40)
+    .map((f) => { try { return { f, m: statSync(f).mtimeMs }; } catch { return null; } })
+    .filter(Boolean as any as (x: any) => x is { f: string; m: number })
+    .sort((a, b) => b.m - a.m);
+  for (const { f } of files) if (codexCwd(f) === cwd) return f;
+  return null;
+}
+
 /**
  * Tails a transcript file: parses the whole thing up front, then polls for
  * appended lines. New subscribers get the full history, then live events.
@@ -184,7 +258,7 @@ export class TranscriptTailer {
   private timer: ReturnType<typeof setInterval> | null = null;
   private seenUser = new Set<string>(); // dedup a message that is both enqueue + user
 
-  constructor(private file: string) {}
+  constructor(private file: string, private parse: LineParser = parseClaudeLine, private dedup = true) {}
 
   start(): void {
     this.readNew();
@@ -232,9 +306,9 @@ export class TranscriptTailer {
     const fresh: ChatEvent[] = [];
     for (const line of lines) {
       if (!line.trim()) continue;
-      const ev = parseClaudeLine(line);
+      const ev = this.parse(line);
       if (!ev) continue;
-      if (ev.role === 'user') {
+      if (this.dedup && ev.role === 'user') {
         // a queued message can appear as both enqueue and user — show it once
         const key = ev.blocks.filter((b) => b.kind === 'text').map((b) => b.text ?? '').join('').replace(/\s+/g, ' ').trim();
         if (key) {

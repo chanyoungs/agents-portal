@@ -8,14 +8,16 @@ import type { SessionInfo } from '../shared/protocol.js';
 
 const exec = promisify(execFile);
 
-export interface ClaudeSession {
+export interface AgentSession {
   session: string;
   cwd: string;
-  /** Unix seconds the Claude process started (fallback transcript matching). */
+  /** Which coding agent runs in this tmux session. */
+  agent: 'claude' | 'codex';
+  /** Unix seconds the agent process started (fallback transcript matching). */
   start: number;
-  /** Exact transcript session id, from ~/.claude/sessions/<pid>.json. */
+  /** Exact transcript session id, from ~/.claude/sessions/<pid>.json (Claude only). */
   sessionId?: string;
-  /** Live status from the session file: 'busy' | 'idle'. */
+  /** Live status from the session file: 'busy' | 'idle' (Claude only). */
   status?: string;
 }
 
@@ -48,7 +50,7 @@ function procTable(): Map<number, { ppid: number; comm: string; start: number }>
  * All tmux sessions running Claude, with the Claude process's start time — used
  * to map each session to its own transcript (sessions can share a cwd).
  */
-export async function claudeSessions(): Promise<ClaudeSession[]> {
+export async function agentSessions(): Promise<AgentSession[]> {
   let stdout = '';
   try {
     ({ stdout } = await exec('tmux', ['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}']));
@@ -60,36 +62,55 @@ export async function claudeSessions(): Promise<ClaudeSession[]> {
     a.push(pid);
     children.set(info.ppid, a);
   }
-  const findClaude = (root: number): number | null => {
+  const findProc = (root: number, name: string): number | null => {
     const stack = [root];
     while (stack.length) {
       const p = stack.pop()!;
-      if (table.get(p)?.comm === 'claude') return p;
+      if (table.get(p)?.comm === name) return p;
+      for (const c of children.get(p) ?? []) stack.push(c);
+    }
+    return null;
+  };
+  // Codex runs as `node …/codex`, so its comm is 'node'. Find a node descendant
+  // whose cmdline references codex.
+  const findCodexNode = (root: number): number | null => {
+    const stack = [root];
+    while (stack.length) {
+      const p = stack.pop()!;
+      if (table.get(p)?.comm === 'node') {
+        try { if (/codex/.test(readFileSync(`/proc/${p}/cmdline`, 'utf8'))) return p; } catch { /* gone */ }
+      }
       for (const c of children.get(p) ?? []) stack.push(c);
     }
     return null;
   };
   const btime = bootTime();
-  const out = new Map<string, ClaudeSession>();
+  const out = new Map<string, AgentSession>();
   for (const line of stdout.split('\n')) {
     if (!line.trim()) continue;
     const [session, panePid, cmd, cwd] = line.split('\t');
-    if (cmd !== 'claude') continue;
-    const cp = findClaude(Number(panePid)) ?? Number(panePid);
+    let agent: 'claude' | 'codex' | null = null;
+    let cp: number;
+    if (cmd === 'claude') { agent = 'claude'; cp = findProc(Number(panePid), 'claude') ?? Number(panePid); }
+    else if (cmd === 'codex') { agent = 'codex'; cp = findProc(Number(panePid), 'codex') ?? Number(panePid); }
+    else if (cmd === 'node') { const cx = findCodexNode(Number(panePid)); if (cx) { agent = 'codex'; cp = cx; } else continue; }
+    else continue;
     const info = table.get(cp);
     if (!info) continue;
     const start = btime + info.start / 100; // USER_HZ = 100 on Linux
-    // Exact session id + live status from ~/.claude/sessions/<pid>.json.
     let sessionId: string | undefined;
     let status: string | undefined;
     let realCwd = cwd;
-    try {
-      const sf = JSON.parse(readFileSync(join(homedir(), '.claude', 'sessions', `${cp}.json`), 'utf8'));
-      sessionId = sf.sessionId;
-      status = sf.status;
-      if (sf.cwd) realCwd = sf.cwd;
-    } catch { /* no session file */ }
-    if (!out.has(session)) out.set(session, { session, cwd: realCwd, start, sessionId, status });
+    if (agent === 'claude') {
+      // exact session id + live status from ~/.claude/sessions/<pid>.json
+      try {
+        const sf = JSON.parse(readFileSync(join(homedir(), '.claude', 'sessions', `${cp}.json`), 'utf8'));
+        sessionId = sf.sessionId;
+        status = sf.status;
+        if (sf.cwd) realCwd = sf.cwd;
+      } catch { /* no session file */ }
+    }
+    if (!out.has(session)) out.set(session, { session, cwd: realCwd, agent, start, sessionId, status });
   }
   return [...out.values()];
 }
